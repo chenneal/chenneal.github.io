@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="X-UA-Compatible" content="ie=edge">
+  <meta name="theme-color" content="#3367D6"/>
+  <link rel="apple-touch-icon" href="/icons-192.png">
+  <link rel="manifest" href="/manifest.json">
+
+  
+
+  
+
+  
+    <meta name="author" content="死线">
+  
+
+  
+
+  
+
+  <title>phxpaxos源码阅读之三：粉墨登场 | 死线的部落格</title>
+
+  
+
+  
+    <link rel="icon" href="/favicon.ico">
+  
+
+  
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/typeface-source-code-pro@1.1.3/index.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlightjs@9.16.2/styles/monokai.css">
+  
+
+  
+<link rel="stylesheet" href="/css/style.css">
+
+<meta name="generator" content="Hexo 5.3.0"></head>
+<body>
+  <div class="root-container">
+    <!-- navbar -->
+<nav class="navbar">
+  <div class="navbar-content">
+    <!-- logo -->
+    <div class="navbar-logo">
+      <a href="/">
+        
+          死线的部落格
+        
+      </a>
+    </div>
+    <!-- link -->
+    <div class="navbar-link">
+      <div class="navbar-btn">
+        <div></div>
+        <div></div>
+        <div></div>
+      </div>
+      <ul class="navbar-list">
+        
+          <li class="navbar-list-item"><a href="/">首页</a></li>
+        
+          <li class="navbar-list-item"><a href="/links">友链</a></li>
+        
+          <li class="navbar-list-item"><a href="/messages">留言</a></li>
+        
+          <li class="navbar-list-item"><a href="/about">关于</a></li>
+        
+      </ul>
+    </div>
+  </div>
+</nav>
+
+    
+<!-- header container -->
+<header class="header-container post">
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+    <div class="header-content">
+      
+        <div class="post-image" style="background-image: url(https://r.photo.store.qq.com/psb?/V14E79GG4eqYl3/2z7xX8f4KxOsJQYfSAxYoYW7d9JON5J8JnWT*Xncr0k!/r/dFEBAAAAAAAA)"></div>
+      
+
+      <div class="post-text">
+        <div class="type-wrap">
+          <a class="article-category-link" href="/categories/%E5%88%86%E5%B8%83%E5%BC%8F%E7%B3%BB%E7%BB%9F/">分布式系统</a>
+        </div>
+        <h1 class="title-wrap">phxpaxos源码阅读之三：粉墨登场</h1>
+        <h2 class="title-sub-wrap">
+          <strong>死线</strong>
+          <span>发布于</span>
+          
+  <a href="javascript:;" class="article-date">
+    <time datetime="2017-03-26T13:12:06.000Z" itemprop="datePublished">2017-03-26</time>
+  </a>
+
+        </h2>
+      </div>
+    </div>
+  
+
+  
+  
+  
+</header>
+
+    <!-- 文章 -->
+
+<!-- 文章内容 -->
+
+<div class="body-container">
+  <article class="content-container article-container">
+    <div class="article-content">
+      
+      
+
+      <section class="article-entry">
+        <h3 id="前言"><a href="#前言" class="headerlink" title="前言"></a>前言</h3><p>接上篇，这篇文章就开始进入这个项目的核心部分，对，就是有关 paxos 算法本身的部分。说实话写这部分的文章（肯定不止一篇）之前我花了好多时间准备，真是亚历山大。因为这部分内容是在过于庞大，花了好长的时间才大致理出个所以然来。不仅要理解 multi-paxos 本身，还要了解具体的工程实现手段，很大一部分时间还是去阅读与算法本身无关的代码去了。</p>
+<p>这篇文章我们直接去看五个核心的类 Instance, Committer, Acceptor, Proposer 与 Learner 。是不是很兴奋？我也是一样，读通只后有着说不出的爽快感，下面直接来看。</p>
+<a id="more"></a>
+
+<h3 id="全貌"><a href="#全貌" class="headerlink" title="全貌"></a>全貌</h3><p>我们先整理一下这五个类之间的关系，刚开始可能会一脸懵逼，paxos 算法的 3 个角色自然是一目了然，Instance 和 Committer 是个什么鬼？先莫急，先上一个五个类的关系图：</p>
+<img src="http://7xk6yg.com1.z0.glb.clouddn.com/phxpaxos%E6%BA%90%E7%A0%81%E9%98%85%E8%AF%BB%E4%B9%8B%E4%B8%89%EF%BC%9A%E7%B2%89%E5%A2%A8%E7%99%BB%E5%9C%BA%231.jpg" class="" title="结构图" alt="结构图">
+
+<p>通过上面的图我们可以知晓整个 phxpaxos 类分布的全貌：每一个节点的信息由 PNode 类统领，PNode类中包含若干个 Group 实例，这个数量是参数化的，多数的 Group 仅仅是为了高并发，和算法本身无关，这些 Group 实例共享一个网络模块和一个存储模块；Group 与 Instance 实例一一对应，但是 Instance 会不断的刷新擦除，我们称为一轮 paxos 实例；每一个 Instance 包含 paxos 算法的三大角色 Acceptor, Proposer，Learner 以及一个 Committer ，同样的，这四个角色都是可以复用的。</p>
+<h3 id="Committer-的作用"><a href="#Committer-的作用" class="headerlink" title="Committer 的作用"></a>Committer 的作用</h3><p>Committer 只是一个代理的 Proposer 类，引入它的作用是为了过载保护。在上面两篇文章里我们讲了官方自带的实例 PhxKV ，其中 Put 一个值时我们调用了下面的接口：</p>
+<figure class="highlight c++"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br></pre></td><td class="code"><pre><code class="hljs C++"><span class="hljs-keyword">int</span> PNode :: Propose(<span class="hljs-keyword">const</span> <span class="hljs-keyword">int</span> iGroupIdx, <span class="hljs-keyword">const</span> <span class="hljs-built_in">std</span>::<span class="hljs-built_in">string</span> &amp; sValue, \<br>                     <span class="hljs-keyword">uint64_t</span> &amp; llInstanceID, SMCtx * poSMCtx)<br>&#123;<br>    <span class="hljs-keyword">if</span> (!CheckGroupID(iGroupIdx))<br>    &#123;<br>        <span class="hljs-keyword">return</span> Paxos_GroupIdxWrong;<br>    &#125;<br><br>    <span class="hljs-comment">// 这个 Propose 接口只是简单的调用了对应 GroupID 的 Committer 的 NewValueGetID 函数。</span><br>    <span class="hljs-keyword">return</span> m_vecGroupList[iGroupIdx]-&gt;GetCommitter() \<br>           -&gt;NewValueGetID(sValue, llInstanceID, poSMCtx);<br>&#125;<br></code></pre></td></tr></table></figure>
+<p>这个 Propose 是 PNode 类的一个公共接口，它的命名十分容易让人混淆，我想很多人在阅读 phxpaxos 看不下去多半就是因为这个接口。事实上它和 paxos 算法并没有多大联系，只是一个代理，那么谁是它的接线人呢？我们直接来看 Committer 的  NewValueGetID 函数：</p>
+<figure class="highlight c++"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br></pre></td><td class="code"><pre><code class="hljs C++"><span class="hljs-keyword">int</span> Committer :: NewValueGetID(<span class="hljs-keyword">const</span> <span class="hljs-built_in">std</span>::<span class="hljs-built_in">string</span> &amp; sValue, <span class="hljs-keyword">uint64_t</span> &amp; llInstanceID, \<br>                               SMCtx * poSMCtx)<br>&#123;<br>    BP-&gt;GetCommiterBP()-&gt;NewValue();<br>    <span class="hljs-comment">// 最多可以尝试三次，作者似乎认为这里没必要使用宏。</span><br>    <span class="hljs-keyword">int</span> iRetryCount = <span class="hljs-number">3</span>;<br>    <span class="hljs-keyword">int</span> ret = PaxosTryCommitRet_OK;<br>    <span class="hljs-keyword">while</span>(iRetryCount--)<br>    &#123;<br>        TimeStat oTimeStat;<br>        oTimeStat.Point();<br>        <span class="hljs-comment">// 每次 step 的动作接口。</span><br>        ret = NewValueGetIDNoRetry(sValue, llInstanceID, poSMCtx);<br>        <span class="hljs-keyword">if</span> (ret != PaxosTryCommitRet_Conflict)<br>        &#123;<br>            ....<br>        &#125;<br>        ....<br>    &#125;<br>    <span class="hljs-keyword">return</span> ret;<br>&#125;<br></code></pre></td></tr></table></figure>
+<p>可以看出尝试去 commit 也就是 propose 一个新值有 3 次机会，每次调用 NewValueGetIDNoRetry 接口，那么就看它的代码：</p>
+<figure class="highlight c++"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br><span class="line">45</span><br><span class="line">46</span><br><span class="line">47</span><br><span class="line">48</span><br><span class="line">49</span><br></pre></td><td class="code"><pre><code class="hljs C++"><span class="hljs-keyword">int</span> Committer :: NewValueGetIDNoRetry(<span class="hljs-keyword">const</span> <span class="hljs-built_in">std</span>::<span class="hljs-built_in">string</span> &amp; sValue, \ <br>                                      <span class="hljs-keyword">uint64_t</span> &amp; llInstanceID, SMCtx * poSMCtx)<br>&#123;<br>    LogStatus();<br>    <span class="hljs-keyword">int</span> iLockUseTimeMs = <span class="hljs-number">0</span>;<br>    <span class="hljs-keyword">bool</span> bHasLock = m_oWaitLock.Lock(m_iTimeoutMs, iLockUseTimeMs);<br>    <span class="hljs-keyword">if</span> (!bHasLock)<br>    &#123;<br>        <span class="hljs-comment">// 两种情况会拿不到锁，一种是拿锁的过程超时了，</span><br>        <span class="hljs-comment">// 还有一种是有太多的线程在等待锁。</span><br>        <span class="hljs-keyword">if</span> (iLockUseTimeMs &gt; <span class="hljs-number">0</span>)<br>        &#123;<br>            PLGErr(<span class="hljs-string">&quot;Try get lock, but timeout, lockusetime %dms&quot;</span>, iLockUseTimeMs);<br>            <span class="hljs-keyword">return</span> PaxosTryCommitRet_Timeout; <br>        &#125;<br>        <span class="hljs-keyword">else</span><br>        &#123;<br>            PLGErr(<span class="hljs-string">&quot;Try get lock, but too many thread waiting, reject&quot;</span>);<br>            <span class="hljs-keyword">return</span> PaxosTryCommitRet_TooManyThreadWaiting_Reject;<br>        &#125;<br>    &#125;<br>    <span class="hljs-keyword">int</span> iLeftTimeoutMs = <span class="hljs-number">-1</span>;<br>    <span class="hljs-keyword">if</span> (m_iTimeoutMs &gt; <span class="hljs-number">0</span>)<br>    &#123;<br>        <span class="hljs-comment">// 计算剩下还有多少时间可以运行本次 commit 。</span><br>        iLeftTimeoutMs = m_iTimeoutMs &gt; iLockUseTimeMs ? m_iTimeoutMs - iLockUseTimeMs : <span class="hljs-number">0</span>;<br>        <span class="hljs-keyword">if</span> (iLeftTimeoutMs &lt; <span class="hljs-number">200</span>)<br>        &#123;<br>            PLGErr(<span class="hljs-string">&quot;Get lock ok, but lockusetime %dms too long, lefttimeout %dms&quot;</span>, \<br>                                                  iLockUseTimeMs, iLeftTimeoutMs);<br>            m_oWaitLock.UnLock();<br>            <span class="hljs-keyword">return</span> PaxosTryCommitRet_Timeout;<br>        &#125;<br>    &#125;<br>    PLGImp(<span class="hljs-string">&quot;GetLock ok, use time %dms&quot;</span>, iLockUseTimeMs);<br>    <span class="hljs-comment">//pack smid to value</span><br>    <span class="hljs-keyword">int</span> iSMID = poSMCtx != <span class="hljs-literal">nullptr</span> ? poSMCtx-&gt;m_iSMID : <span class="hljs-number">0</span>;<br>    <span class="hljs-built_in">string</span> sPackSMIDValue = sValue;<br>    <span class="hljs-comment">// 消息需要合并一个 iSMID 作为状态机的辨识，方便以后状态机的执行。</span><br>    m_poSMFac-&gt;PackPaxosValue(sPackSMIDValue, iSMID);<br>    <span class="hljs-comment">// 初始化 commit 类。 </span><br>    m_poCommitCtx-&gt;NewCommit(&amp;sPackSMIDValue, poSMCtx, iLeftTimeoutMs);<br>    <span class="hljs-comment">// 唤醒消费者。</span><br>    m_poIOLoop-&gt;AddNotify();<br>    <span class="hljs-comment">// 等待最后的结果，等待过程中会休眠。</span><br>    <span class="hljs-keyword">int</span> ret = m_poCommitCtx-&gt;GetResult(llInstanceID);<br>    m_oWaitLock.UnLock();<br>    <span class="hljs-keyword">return</span> ret;<br>&#125;<br></code></pre></td></tr></table></figure>
+<p>这里很明显了，在接受外界的 Propose 调用时，phxpaxos 将尝试去获取 m_oWaitLock 锁，只有拿到这把锁的线程才能真正的去刷新 Committer ，而拿不到的线程只能老老实实的排队去等待，如果超时则放弃，这就是 phxpaxos 所谓的过载保护机制。</p>
+<h3 id="IOLoop"><a href="#IOLoop" class="headerlink" title="IOLoop"></a>IOLoop</h3><p>到这里了，还是没有说什么时候才开始真正的 propose 呢？答案就是上图的 IOLoop 类中，这个 IOLoop 类中包含有 2 个消息队列 m_oMessageQueue 和 m_oRetryQueue ， proposer , acceptor , leaner 角色产生的所有的消息全部都会扔到这个 m_oMessageQueue 中。IOLoop 会循环调用 OneLoop 接口做消息的处理，有的消息是需要重复去处理的，我们会将它们扔进 m_oRetryQueue 中去。让我们看一下 OneLoop 的代码：</p>
+<figure class="highlight c++"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br></pre></td><td class="code"><pre><code class="hljs C++"><span class="hljs-keyword">void</span> IOLoop :: OneLoop(<span class="hljs-keyword">const</span> <span class="hljs-keyword">int</span> iTimeoutMs)<br>&#123;<br>    <span class="hljs-built_in">std</span>::<span class="hljs-built_in">string</span> * psMessage = <span class="hljs-literal">nullptr</span>;<br>    <span class="hljs-comment">// 保护队列防止过程中被外部修改。</span><br>    m_oMessageQueue.lock();<br>    <span class="hljs-keyword">bool</span> bSucc = m_oMessageQueue.peek(psMessage, iTimeoutMs);<br>    <span class="hljs-keyword">if</span> (!bSucc)<br>    &#123;<br>        m_oMessageQueue.unlock();<br>    &#125;<br>    <span class="hljs-keyword">else</span><br>    &#123;<br>        m_oMessageQueue.pop();<br>        m_oMessageQueue.unlock();<br>        <span class="hljs-keyword">if</span> (psMessage != <span class="hljs-literal">nullptr</span> &amp;&amp; psMessage-&gt;size() &gt; <span class="hljs-number">0</span>)<br>        &#123;<br>            m_iQueueMemSize -= psMessage-&gt;size();<br>            <span class="hljs-comment">// paxos 的核心接口，根据不同的消息类型进入不同的处理入口。</span><br>            m_poInstance-&gt;OnReceive(*psMessage);<br>        &#125;<br>        <span class="hljs-keyword">delete</span> psMessage;<br>    &#125;<br><br>    <span class="hljs-comment">// 这是个特殊的队列，用来处理 paxos 算法过程中产生的 retry 消息，</span><br>    <span class="hljs-comment">// 这些消息可以重复的去处理，所以才使用这个队列。</span><br>    DealWithRetry();<br>    <span class="hljs-comment">//must put on here</span><br>    <span class="hljs-comment">//because addtimer on this funciton</span><br>    <span class="hljs-comment">// 这个用来检查是否已经有了新的外界的 propose 值，如果有了就去做处理。</span><br>    m_poInstance-&gt;CheckNewValue();<br>&#125;<br></code></pre></td></tr></table></figure>
+<h3 id="消息处理"><a href="#消息处理" class="headerlink" title="消息处理"></a>消息处理</h3><p>我们总算找到了 paxos 消息处理的总入口「OnReceive」，每次我们从 IOLoop 的消息队列中取出一条消息就去调用这个处理接口，这个接口的代码如下：</p>
+<figure class="highlight c++"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br></pre></td><td class="code"><pre><code class="hljs C++"><span class="hljs-keyword">void</span> Instance :: OnReceive(<span class="hljs-keyword">const</span> <span class="hljs-built_in">std</span>::<span class="hljs-built_in">string</span> &amp; sBuffer)<br>&#123;<br>    ....<br><br>    <span class="hljs-keyword">if</span> (iCmd == MsgCmd_PaxosMsg)<br>    &#123;<br>        ....<br><br>        <span class="hljs-comment">// 处理 paxos 消息。</span><br>        OnReceivePaxosMsg(oPaxosMsg);<br>    &#125;<br>    <span class="hljs-keyword">else</span> <span class="hljs-keyword">if</span> (iCmd == MsgCmd_CheckpointMsg)<br>    &#123;<br>        ....<br><br>        <span class="hljs-comment">// 处理 checkpoint 消息。</span><br>        OnReceiveCheckpointMsg(oCheckpointMsg);<br>    &#125;<br>&#125;<br></code></pre></td></tr></table></figure>
+<p>令人失望的是这同样是个皮包函数，根据消息的 cmd 类型，分为两路处理，由于「checkpoint」机制比较复杂，我们先不讨论，直接看 paxos 消息的处理接口「OnReceivePaxosMsg」</p>
+<figure class="highlight c++"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br></pre></td><td class="code"><pre><code class="hljs C++"><span class="hljs-keyword">int</span> Instance :: OnReceivePaxosMsg(<span class="hljs-keyword">const</span> PaxosMsg &amp; oPaxosMsg, <span class="hljs-keyword">const</span> <span class="hljs-keyword">bool</span> bIsRetry)<br>&#123;<br>    ....<br><br>    <span class="hljs-comment">// 这里的消息都由 proposer 去处理。</span><br>    <span class="hljs-keyword">if</span> (oPaxosMsg.msgtype() == MsgType_PaxosPrepareReply<br>            || oPaxosMsg.msgtype() == MsgType_PaxosAcceptReply<br>            || oPaxosMsg.msgtype() == MsgType_PaxosProposal_SendNewValue)<br>    &#123;<br>        ....<br><br>        <span class="hljs-keyword">return</span> ReceiveMsgForProposer(oPaxosMsg);<br>    &#125;<br>    <span class="hljs-comment">// 这里的消息都由 acceptor 去处理。</span><br>    <span class="hljs-keyword">else</span> <span class="hljs-keyword">if</span> (oPaxosMsg.msgtype() == MsgType_PaxosPrepare<br>            || oPaxosMsg.msgtype() == MsgType_PaxosAccept)<br>    &#123;<br>        ....<br><br>        <span class="hljs-comment">// acceptor 处理的入口。</span><br>        <span class="hljs-keyword">return</span> ReceiveMsgForAcceptor(oPaxosMsg, bIsRetry);<br>    &#125;<br>    <span class="hljs-comment">// 这里的消息都由 learner 去处理。</span><br>    <span class="hljs-keyword">else</span> <span class="hljs-keyword">if</span> (oPaxosMsg.msgtype() == MsgType_PaxosLearner_AskforLearn<br>            || oPaxosMsg.msgtype() == MsgType_PaxosLearner_SendLearnValue<br>            || oPaxosMsg.msgtype() == MsgType_PaxosLearner_ProposerSendSuccess<br>            || oPaxosMsg.msgtype() == MsgType_PaxosLearner_ComfirmAskforLearn<br>            || oPaxosMsg.msgtype() == MsgType_PaxosLearner_SendNowInstanceID<br>            || oPaxosMsg.msgtype() == MsgType_PaxosLearner_SendLearnValue_Ack<br>            || oPaxosMsg.msgtype() == MsgType_PaxosLearner_AskforCheckpoint)<br>    &#123;<br>        ....<br><br>        <span class="hljs-comment">// learner 处理的入口。</span><br>        <span class="hljs-keyword">return</span> ReceiveMsgForLearner(oPaxosMsg);<br>    &#125;<br>    <span class="hljs-keyword">else</span><br>    &#123;<br>        PLGErr(<span class="hljs-string">&quot;Invaid msgtype %d&quot;</span>, oPaxosMsg.msgtype());<br>    &#125;<br>    <span class="hljs-keyword">return</span> <span class="hljs-number">0</span>;<br>&#125;<br></code></pre></td></tr></table></figure>
+<p>哈哈，这个接口可能会令很多人吓一跳，我们认为 paxos 里面最简单的 learner 角色的处理居然是最复杂的，这和 multi-paxos 的工程优化有关系，如果完全不考虑效率的话，我们完全不需要设计的这么复杂。</p>
+<h3 id="总结"><a href="#总结" class="headerlink" title="总结"></a>总结</h3><p>对于外界的请求，phxpaxos 直接将责任扔给了 Committer 类并做了过载保护，所有角色的动作并不做同步处理，而是全部扔进两个消息队列中做异步处理。我们还发现了消息处理的总入口，并看到了一个有趣的现象，在实际工程的设计中，learner 有着相当复杂的设计，本质原因是工程项目都是以效率为先，而不是单纯地结果论。</p>
+<p>下一篇我们直接来分析 proposer 和 acceptor 的处理消息的具体流程，即「multi-paxos」算法本身，敬请期待。</p>
+<h3 id="项目链接"><a href="#项目链接" class="headerlink" title="项目链接"></a>项目链接</h3><p>我将源码分析工作的注释同步更新到了 github 的项目中，下面是项目链接：</p>
+<p><a target="_blank" rel="noopener" href="https://github.com/chenneal/phxpaxos-annotated.git">https://github.com/chenneal/phxpaxos-annotated.git</a></p>
+<p>欢迎大家 star 。</p>
+<h3 id="文章列表"><a href="#文章列表" class="headerlink" title="文章列表"></a>文章列表</h3><p><a href="../../../../2017/03/162223.html">phxpaxos源码阅读之一：走马观花</a></p>
+<p><a href="../../../../2017/03/181347.html">phxpaxos源码阅读之二：粮草先行</a></p>
+<p><a href="../../../../2017/03/262112.html">phxpaxos源码阅读之三：粉墨登场</a></p>
+<p><a href="../../../../2017/03/301627.html">phxpaxos源码阅读之四：各个击破</a></p>
+<p><a href="../../../../2017/04/041822.html">phxpaxos源码阅读之五：暗度陈仓</a></p>
+<p><a href="../../../../2017/04/052031.html">phxpaxos源码阅读之六：完结篇</a></p>
+
+      </section>
+
+      <section class="article-footer">
+        <ul class="article-tag-list" itemprop="keywords"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/paxos/" rel="tag">#paxos</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/%E4%B8%80%E8%87%B4%E6%80%A7%E5%8D%8F%E8%AE%AE/" rel="tag">#一致性协议</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/%E5%88%86%E5%B8%83%E5%BC%8F%E7%B3%BB%E7%BB%9F/" rel="tag">#分布式系统</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90/" rel="tag">#源码分析</a></li></ul>
+      </section>
+
+      <section class="article-navs">
+        
+<nav class="card-container card-article-nav">
+  <div class="card-list">
+    
+      <div id="article-nav-newer" class="card-item">
+        <article>
+          
+          <a class="card-link article-nav-link" href="/2017/03/301627.html"></a>
+          <strong class="article-nav-caption">Newer</strong>
+          <p class="article-nav-title">
+            
+              phxpaxos源码阅读之四：各个击破
+            
+          </p>
+        </article>
+      </div>
+    
+    
+      <div id="article-nav-older" class="card-item">
+        <article>
+          
+          <a class="card-link article-nav-link" href="/2017/03/181347.html"></a>
+          <strong class="article-nav-caption">Older</strong>
+          <p class="article-nav-title">
+            
+              phxpaxos源码阅读之二：粮草先行
+            
+          </p>
+        </article>
+      </div>
+    
+  </div>
+</nav>
+
+      </section>
+    </div>
+  </article>
+</div>
+
+    <!-- footer container -->
+<footer id="footer" class="footer">
+  <div class="footer-container">
+    
+    <div class="social-icons social-icons-footer">
+      <a href="https://github.com/chenneal" target="_blank" rel="noopener noreferrer">
+  <svg class="icon icon-github" viewBox="0 0 1024 1024" version="1.1" xmlns="http://www.w3.org/2000/svg">
+    <path d="M64.6 512c0 195.6 125.4 361.9 300.1 422.9 23.5 5.9 19.9-10.8 19.9-22.2v-77.6c-135.8 15.9-141.3-74-150.5-89-18.5-31.5-61.9-39.5-49-54.5 31-15.9 62.5 4 98.9 58 26.4 39.1 77.9 32.5 104.1 26 5.7-23.5 17.9-44.5 34.7-60.9-140.7-25.2-199.4-111.1-199.4-213.3 0-49.5 16.4-95.1 48.4-131.8-20.4-60.6 1.9-112.4 4.9-120.1 58.2-5.2 118.5 41.6 123.3 45.3 33.1-8.9 70.8-13.7 112.9-13.7 42.4 0 80.3 4.9 113.5 13.9 11.3-8.6 67.3-48.8 121.4-43.9 2.9 7.7 24.7 58.3 5.5 118.1 32.5 36.8 49 82.8 49 132.4 0 102.3-59 188.3-200.2 213.2 23.5 23.3 38.1 55.5 38.1 91.1v112.7c0.8 9 0 17.9 15.1 17.9C832.7 877 960.4 709.4 960.4 512.1c0-247.5-200.6-447.9-447.9-447.9C265 64.1 64.6 264.5 64.6 512z"></path>
+  </svg>
+</a><a href="https://www.zhihu.com/people/yu-xin-98-85" target="_blank" rel="noopener noreferrer">
+  <svg t="1587373160860" class="icon icon-zhihu" viewBox="0 0 1024 1024" version="1.1" xmlns="http://www.w3.org/2000/svg">
+    <path d="M544.949 561.422s0-71.387-34.779-75.050c-34.779-3.663-142.775 0-142.775 0v-219.654h161.078s-1.83-73.219-32.949-73.219h-261.755l43.93-117.148s-65.897 3.663-89.692 45.761-98.844 252.604-98.844 252.604 25.627 10.983 67.726-20.134c42.101-31.116 56.743-86.033 56.743-86.033l76.879-3.663 1.83 223.316s-133.621-1.83-161.078 0c-27.457 1.83-42.101 75.050-42.101 75.050h203.182s-18.307 124.47-69.557 214.164c-53.085 89.692-151.929 161.078-151.929 161.078s71.387 29.287 140.947-10.983c69.557-42.101 120.811-223.316 120.811-223.316l162.912 203.182s14.643-97.013-1.83-124.47c-18.307-27.457-113.49-137.283-113.49-137.283l-42.101 36.607 29.287-120.811h177.552zM587.050 188.010l-1.83 660.793h65.897l23.795 82.37 115.321-82.37h162.912v-660.793h-366.091zM879.92 775.584h-76.879l-97.013 75.050-21.965-75.050h-20.134v-512.527h215.991v512.527z"></path>
+  </svg>
+</a><a href="mailto:chenneal@126.com" target="_blank" rel="noopener noreferrer">
+  <svg class="icon icon-email" viewBox="0 0 1024 1024" version="1.1" xmlns="http://www.w3.org/2000/svg">
+    <path d="M490.338462 592.738462c11.815385 11.815385 29.538462 11.815385 41.353846 0l445.046154-413.538462c7.876923-15.753846 5.907692-41.353846-25.6-41.353846l-880.246154 1.969231c-23.630769 0-43.323077 21.661538-25.6 41.353846l445.046154 411.569231zM984.615385 340.676923c0-19.692308-23.630769-31.507692-39.384616-17.723077L596.676923 643.938462c-23.630769 21.661538-53.169231 33.476923-84.676923 33.476923s-61.046154-11.815385-84.676923-31.507693L80.738462 322.953846c-15.753846-13.784615-39.384615-3.938462-39.384616 17.723077C39.384615 334.769231 39.384615 787.692308 39.384615 787.692308c0 43.323077 35.446154 78.769231 78.769231 78.76923h787.692308c43.323077 0 78.769231-35.446154 78.769231-78.76923V340.676923z"></path>
+  </svg>
+</a><a href="https://www.youtube.com/channel/UCULCGgyTuTG8_ft7gaKSJtg/featured" target="_blank" rel="noopener noreferrer">
+  <svg class="icon icon-youtube" viewBox="0 0 1024 1024" version="1.1" xmlns="http://www.w3.org/2000/svg">
+    <path d="M981.333333 414.293333a362.666667 362.666667 0 0 0-38.826666-176.213333 124.586667 124.586667 0 0 0-73.386667-42.666667A3343.36 3343.36 0 0 0 512 182.186667a3347.2 3347.2 0 0 0-355.84 12.8 122.453333 122.453333 0 0 0-62.293333 31.573333c-38.4 35.413333-42.666667 96-46.933334 147.2a2060.373333 2060.373333 0 0 0 0 276.48 407.466667 407.466667 0 0 0 12.8 85.333333 133.973333 133.973333 0 0 0 30.293334 58.026667 122.026667 122.026667 0 0 0 63.573333 33.28 1927.68 1927.68 0 0 0 277.333333 14.08c149.333333 2.133333 280.32 0 435.2-11.946667a122.88 122.88 0 0 0 65.28-33.28 106.24 106.24 0 0 0 26.026667-42.666666 451.413333 451.413333 0 0 0 22.186667-145.066667c1.706667-23.893333 1.706667-168.106667 1.706666-193.706667zM415.573333 633.6V369.493333l252.586667 132.693334c-70.826667 39.253333-164.266667 83.626667-252.586667 131.413333z"></path>
+  </svg>
+</a>
+    </div>
+     
+    <p>&copy; 2021 <a href="/" target="_blank">死线</a></p>
+
+    
+      <p id="hitokoto"></p>
+      <script src="https://v1.hitokoto.cn/?c=a&amp;encode=js&select=%23hitokoto" defer></script>
+    
+
+    
+      <p><a href="http://www.miitbeian.gov.cn" target="_blank">粤ICP备19085010号</a></p>
+    
+
+    <p>Powered by <a href="https://hexo.io" target="_blank" rel="noopener noreferrer">Hexo</a> Theme - <a href="https://github.com/miiiku/flex-block" target="_blank" rel="noopener noreferrer author">flex-block</a></p>
+    
+    <!--
+    <div class="footer-container__texts">
+      <p>ヽ｀、ヽ｀｀、ヽ｀ヽ｀、、ヽ｀ヽ、ヽ｀、ヽ｀｀、ヽ、｀｀、、ヽ｀ヽ、｀｀、、ヽ｀ヽ、｀ヽ、｀ヽ、｀ヽ</p>
+      <p>｀、ヽ｀｀、ヽ、｀｀｀、｀、ヽ🌙｀｀、｀ヽ｀ヽ、ヽ｀、ヽ｀ヽ、ヽ｀、ヽ｀ヽ、ヽ｀、ヽ｀｀、｀ヽ、｀</p>
+      <p>｀、｀｀、｀、ヽ｀｀、、ヽヽ｀、｀ヽ｀ヽ、ヽ｀、ヽ｀ヽ、ヽ｀、、、ヽヽ、｀｀、、ヽ｀、ヽ｀｀、ヽ｀ヽ｀</p>
+      <p>ヽ｀、｀｀、｀、ヽ｀｀、、ヽヽ｀、｀、、ヽヽ、｀Time waits for on one 🍓｀、、ヽ｀、ヽ｀｀、ヽ｀ヽ｀</p>
+      <p>｀ヽ｀｀、ヽ｀ヽ｀、、ヽ｀ヽ｀ヽ｀ヽ、ヽ｀、ヽ｀｀、ヽ、｀｀、、ヽ｀ヽ、｀｀、、ヽ｀ヽ、｀ヽ、｀ヽ、｀ヽ</p>
+    </div>
+    -->
+  </div>
+</footer>
+  </div>
+
+  <div class="back-to-top-fixed">
+    <svg class="icon icon-back-to-top" viewBox="0 0 1024 1024" version="1.1" xmlns="http://www.w3.org/2000/svg">
+  <path d="M725.333333 426.666667c-12.8 0-21.333333-4.266667-29.866667-12.8l-213.333333-213.333333c-17.066667-17.066667-17.066667-42.666667 0-59.733333s42.666667-17.066667 59.733333 0l213.333333 213.333333c17.066667 17.066667 17.066667 42.666667 0 59.733333C746.666667 422.4 738.133333 426.666667 725.333333 426.666667z"></path>
+  <path d="M298.666667 426.666667c-12.8 0-21.333333-4.266667-29.866667-12.8-17.066667-17.066667-17.066667-42.666667 0-59.733333l213.333333-213.333333c17.066667-17.066667 42.666667-17.066667 59.733333 0s17.066667 42.666667 0 59.733333l-213.333333 213.333333C320 422.4 311.466667 426.666667 298.666667 426.666667z"></path>
+  <path d="M512 896c-25.6 0-42.666667-17.066667-42.666667-42.666667L469.333333 170.666667c0-25.6 17.066667-42.666667 42.666667-42.666667s42.666667 17.066667 42.666667 42.666667l0 682.666667C554.666667 878.933333 537.6 896 512 896z"></path>
+</svg> 
+  </div>
+
+  
+  
+<!-- valine 评论 start -->
+<script type="text/javascript" src="//cdn1.lncld.net/static/js/3.0.4/av-min.js"></script>
+<script type="text/javascript" src='//unpkg.com/valine/dist/Valine.min.js'></script>
+<script type="text/javascript">
+  new Valine({
+    el: "#valine_thread",
+    appId: "bOLIWMar1V0Cw9rN0y05YtsS-gzGzoHsz",
+    appKey: "2farfSz878S4va0UCDR98bYB",
+    avatar: "identicon",
+    placeholder: "随便说点什么叭～",
+    notify: true,
+    visitor: true,
+    pageSize: 10,
+  });
+</script>
+<!-- valine 评论 end -->
+
+
+
+  <!-- aplayer 音频 start -->
+  <link rel="stylesheet" href="https://unpkg.com/aplayer@1.10.1/dist/APlayer.min.css">
+  <script type="text/javascript" src="https://unpkg.com/aplayer@1.10.1/dist/APlayer.min.js"></script>
+  <script type="text/javascript">
+    const aplayer = document.querySelectorAll(".aplayer");
+    aplayer && initaplayer(aplayer);
+    function initaplayer(els) {
+      let elsArr = Array.from(els);
+      elsArr.forEach(el => {
+        let params = {
+          container: el,
+          audio: { ...el.dataset },
+          theme: "#b7daff",
+          autoplay: false,
+          loop: false,
+          mutex: true,
+        }
+        if (el.dataset.lrc) {
+          params['lrcType'] = 3
+        }
+        new APlayer(params);
+      });
+    }
+  </script>
+  <!-- aplayer 音频 end -->
+  
+
+<!-- dplayer 视频 start -->
+<script type="text/javascript" src="https://unpkg.com/dplayer@1.25.1/dist/DPlayer.min.js"></script>
+<script type="text/javascript">
+  const dplayer = document.querySelectorAll(".dplayer");
+  dplayer && initDPlayer(dplayer);
+  function initDPlayer(els) {
+    let elsArr = Array.from(els);
+    elsArr.forEach(el => {
+      let url = el.dataset.url;
+      let cover = el.dataset.cover;
+      let subtitle = el.dataset.subtitle;
+
+      let options = {
+        container: el,
+        video: { url: url, pic: cover },
+        theme: "#b7daff",
+        autoplay: false,
+        loop: false,
+        mutex: true,
+      }
+
+      if (subtitle) {
+        options.subtitle = {
+          url: el.dataset.subtitle,
+        }
+      }
+      new DPlayer(options);
+    });
+  }
+</script>
+<!-- dplayer 视频 end -->
+
+
+<!-- waterfall 瀑布流 start -->
+
+<script src="/lib/waterfall.min.js"></script>
+
+<script type="text/javascript">
+
+const waterfalls = document.querySelectorAll(".waterfall-container");
+
+if (waterfalls && waterfalls.length > 0) {
+  waterfalls.forEach((waterfall, index) => {
+    let cls = "waterfall-container-" + index;
+    waterfall.classList.add(cls);
+    initWaterfall(cls, waterfall);
+  });
+}
+
+function initWaterfall(selector, el) {
+  const options = {};
+  if (Object.keys(el.dataset).length > 0) {
+    for (let k in el.dataset) {
+      options[k] = el.dataset[k];
+    }
+  }
+  waterfall(`.${selector}`, options);
+}
+</script>
+<!-- waterfall 瀑布流 end -->
+
+
+  <!-- zoom start -->
+  
+<script src="/lib/zoom.min.js"></script>
+
+  <script type="text/javascript">
+    document.querySelector(".article-content") && zoom(".article-content");
+  </script>
+  <!-- zoom end -->
+  
+
+
+
+  
+
+
+  
+
+
+  
+
+
+
+
+<script src="/js/script.js"></script>
+
+
+  
+  <!-- 尾部用户自定义相关内容 -->
+</body>
+</html>

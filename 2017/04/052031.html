@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="X-UA-Compatible" content="ie=edge">
+  <meta name="theme-color" content="#3367D6"/>
+  <link rel="apple-touch-icon" href="/icons-192.png">
+  <link rel="manifest" href="/manifest.json">
+
+  
+
+  
+
+  
+    <meta name="author" content="死线">
+  
+
+  
+
+  
+
+  <title>phxpaxos源码阅读之六：完结篇 | 死线的部落格</title>
+
+  
+
+  
+    <link rel="icon" href="/favicon.ico">
+  
+
+  
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/typeface-source-code-pro@1.1.3/index.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlightjs@9.16.2/styles/monokai.css">
+  
+
+  
+<link rel="stylesheet" href="/css/style.css">
+
+<meta name="generator" content="Hexo 5.3.0"></head>
+<body>
+  <div class="root-container">
+    <!-- navbar -->
+<nav class="navbar">
+  <div class="navbar-content">
+    <!-- logo -->
+    <div class="navbar-logo">
+      <a href="/">
+        
+          死线的部落格
+        
+      </a>
+    </div>
+    <!-- link -->
+    <div class="navbar-link">
+      <div class="navbar-btn">
+        <div></div>
+        <div></div>
+        <div></div>
+      </div>
+      <ul class="navbar-list">
+        
+          <li class="navbar-list-item"><a href="/">首页</a></li>
+        
+          <li class="navbar-list-item"><a href="/links">友链</a></li>
+        
+          <li class="navbar-list-item"><a href="/messages">留言</a></li>
+        
+          <li class="navbar-list-item"><a href="/about">关于</a></li>
+        
+      </ul>
+    </div>
+  </div>
+</nav>
+
+    
+<!-- header container -->
+<header class="header-container post">
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+    <div class="header-content">
+      
+        <div class="post-image" style="background-image: url(https://r.photo.store.qq.com/psb?/V14E79GG4eqYl3/2z7xX8f4KxOsJQYfSAxYoYW7d9JON5J8JnWT*Xncr0k!/r/dFEBAAAAAAAA)"></div>
+      
+
+      <div class="post-text">
+        <div class="type-wrap">
+          <a class="article-category-link" href="/categories/%E5%88%86%E5%B8%83%E5%BC%8F%E7%B3%BB%E7%BB%9F/">分布式系统</a>
+        </div>
+        <h1 class="title-wrap">phxpaxos源码阅读之六：完结篇</h1>
+        <h2 class="title-sub-wrap">
+          <strong>死线</strong>
+          <span>发布于</span>
+          
+  <a href="javascript:;" class="article-date">
+    <time datetime="2017-04-05T12:31:21.000Z" itemprop="datePublished">2017-04-05</time>
+  </a>
+
+        </h2>
+      </div>
+    </div>
+  
+
+  
+  
+  
+</header>
+
+    <!-- 文章 -->
+
+<!-- 文章内容 -->
+
+<div class="body-container">
+  <article class="content-container article-container">
+    <div class="article-content">
+      
+      
+
+      <section class="article-entry">
+        <h3 id="前言"><a href="#前言" class="headerlink" title="前言"></a>前言</h3><p>这是本系列的最后一篇，由于个人原因实在是没多余的时间写更多的篇幅了，其实 phxpaxos 还有两个比较大的亮点：内置的选主操作和成员的变更操作，还有就是 checkpoint 机制也没有详细的介绍过。以后有时间可能会更，但是不是现在，这一篇我们来做一个总结，概括一下 phxpaxos 的一些亮点。</p>
+<a id="more"></a>
+
+<h3 id="取消-leader-角色"><a href="#取消-leader-角色" class="headerlink" title="取消 leader 角色"></a>取消 leader 角色</h3><p>将 leader 角色混淆在 paxos 中增加了不少算法的复杂度，其实这个角色并不是 paxos 所要求的，纯粹是为了解决冲突问题以及所谓的活锁问题才需要的。 </p>
+<p>phxpaxos 完全取消了 leader 的角色，转而将把控权交给了用户，让他们自己决定是否只在一个节点上去提交，当然了就算不是一个节点提交，照样可以正常运行，只是冲突增加了。</p>
+<p>至于冲突和活锁和冲突问题，phxpaxos 直接选用了一种随机回退的算法去避免冲突。</p>
+<p>这样我们根本不需要去区分系统内所有节点所扮演的角色地位，因为每个节点都是平起平坐的，在某个 proposer 失效时也不用做过多的特殊处理。</p>
+<h3 id="高度抽象的状态机"><a href="#高度抽象的状态机" class="headerlink" title="高度抽象的状态机"></a>高度抽象的状态机</h3><p>phxpaxos 将所有用户的动作行为都交给了状态机，用户可以通过定义自己的状态机而使用 phxpaxos 而完成不同的任务。比如「选主操作」「kv 存取」「成员变更」，它们看上去是大相径庭的任务，但是本质上一模一样，没有必要对他们做特殊对待，全部抽象为一个状态机自己去定义具体的处理操作即可。</p>
+<p>上面的高可控性也变向的告诉我们，要保证整个系统的一致性，必须小心定义自己的状态机，因为定义本身也会影响上层应用的一致性。</p>
+<h3 id="高并发优化"><a href="#高并发优化" class="headerlink" title="高并发优化"></a>高并发优化</h3><p>为了有效的利用多核 CPU ，phxpaxos 抽象出了 group ，每个 group 对应一个线程，并且彼此之间完全不互相干扰，至于这种「分离」标准完全交给应用去做。</p>
+<p>我们知道分布式系统中最大的开销就是网络通信，而 paxos 消息通常是异步的，如果在等待的时间里让 CPU 干等着肯定是非常低效的， phxpaxos 引入了「消息队列」和「定时器堆」，将 paxos 消息已经各种定时时间放在上述两个结构之中，在「等待回复消息」和「定时时间未到」的过程中休眠，从而让别的 group 去使用 CPU ，大大提高了整个系统的效率。</p>
+<h3 id="取消-multi-paxos-的-NO-OP-操作"><a href="#取消-multi-paxos-的-NO-OP-操作" class="headerlink" title="取消 multi-paxos 的 NO-OP 操作"></a>取消 multi-paxos 的 NO-OP 操作</h3><p>phxpaxos 的作者们认为传统的 NO-OP 操作是没必要的，这点和我的看法差不多，不但给算法添加了复杂度，实现难度也增加不少。就算法本身来讲，它并不属于 multi-paxos 的任何一环，应该单独分离开来。</p>
+<p>当然， NO-OP 的出现是为了提高算法的效率，我们知道，相对于 raft 算法，multi-paxos 是存在 gap 的，所谓的 gap ，就是说值的 chosen 的顺序并不确定，为了能让算法继续往下走，我们就闲填入一个 NO-OP 值。但是值得注意的是就算是你填充了 NO-OP 值，还是要从别的节点习得 gap 的 value 去补上漏洞，这样的处理显得非常的繁琐。事实上完全可以让算法本身不产生 gap ，phxpaxos 的设计非常巧妙，整个 instance 都是全局有序去走的，并不会出现 gap 。当然这样 delay 会变得很高，phxpaxos 采用了另外一种做法 batch propose ，这样能获得同样的性能，因为即使填充 gap ，状态机同样要等前面的数据准备好才能继续执行下去。</p>
+<h3 id="尽可能少的写盘"><a href="#尽可能少的写盘" class="headerlink" title="尽可能少的写盘"></a>尽可能少的写盘</h3><p>对于写盘， phxpaxos 总是尽力避免写盘的操作，要么是批量写入，要么是对 sync 进行严格的控制。只要有少量冲突的出现，基本上只需要 accept 过程的一次写盘即可。当然 learn 操作是无可避免的要写盘的，另外 checkpoint 操作则直接传输文件流，非常的 heavy。</p>
+<h3 id="细节优化、参数化、可定制性"><a href="#细节优化、参数化、可定制性" class="headerlink" title="细节优化、参数化、可定制性"></a>细节优化、参数化、可定制性</h3><p>phxpaxos 对于细节上的优化比比皆是，这里就不一一列举了，目测是在使用中遇到各种坑的时候加上去的。另外给开发者提供了很多可定制性空间，比如丰富的参数定制以及非常 nice 的 breakpoint 类；当然风险与方便并存，对于了解不深的开发者，错误的定制会导致未知的错误。</p>
+<h3 id="后谈"><a href="#后谈" class="headerlink" title="后谈"></a>后谈</h3><p>phxpaxos 好像是我第一次完整阅读下来的开源项目，这个项目有个最大的缺点就是注释实在是太少，导致我看的还是非常痛苦的；当然不得不承认，代码的质量本身还是非常高的，虽然没有各种花样的「软件模式」，但是代码布局还是非常实用简洁的，很多地方即使没有注释也能够一目了然。</p>
+<p>一方面理解 multi-paxos 本身就不是一件易事，另一方面在实际工程环境下需要考虑各种各样的问题，使得项目复杂度成倍的上升。所以在看完这个项目的时候还是非常有成就感的，这一切动力也源于自己最近对于分布式一致性协议的热切的好奇心。</p>
+<p>最后还是要感谢微信后台团队带来的这个优秀的项目并且开源，毕竟 paxos 工程实现起来难度还是非常大的，phxpaxos 无论是代码风格还是架构上都是非常值得一读的，文档和作者与开发者的互动都非常的丰富，还是大力推荐一下这个项目。可惜的是自己看了3个多月，只发现了一个 typo ，提交过一个 patch 还是眼花看错了，实在是心里有愧 = = 。</p>
+<p>最近没有多余的时间，有空会去补上「选主算法」和「成员变动」的分析，当然介于我病入膏肓的「拖延症」，建议不要抱太大的期待。</p>
+<p>最后也如果大家也对这个项目或者是 multi-paxos 感兴趣，也欢迎评论或者发邮件与我交流。</p>
+<p>这次是真的再见了，Bye ！</p>
+<h3 id="项目链接"><a href="#项目链接" class="headerlink" title="项目链接"></a>项目链接</h3><p>我将源码分析工作的注释同步更新到了 github 的项目中，下面是项目链接：</p>
+<p><a target="_blank" rel="noopener" href="https://github.com/chenneal/phxpaxos-annotated.git">https://github.com/chenneal/phxpaxos-annotated.git</a></p>
+<p>欢迎大家 star 。</p>
+<h3 id="文章列表"><a href="#文章列表" class="headerlink" title="文章列表"></a>文章列表</h3><p><a href="../../../../2017/03/162223.html">phxpaxos源码阅读之一：走马观花</a></p>
+<p><a href="../../../../2017/03/181347.html">phxpaxos源码阅读之二：粮草先行</a></p>
+<p><a href="../../../../2017/03/262112.html">phxpaxos源码阅读之三：粉墨登场</a></p>
+<p><a href="../../../../2017/03/301627.html">phxpaxos源码阅读之四：各个击破</a></p>
+<p><a href="../../../../2017/04/041822.html">phxpaxos源码阅读之五：暗度陈仓</a></p>
+<p><a href="../../../../2017/04/052031.html">phxpaxos源码阅读之六：完结篇</a></p>
+
+      </section>
+
+      <section class="article-footer">
+        <ul class="article-tag-list" itemprop="keywords"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/paxos/" rel="tag">#paxos</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/%E4%B8%80%E8%87%B4%E6%80%A7%E5%8D%8F%E8%AE%AE/" rel="tag">#一致性协议</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/%E5%88%86%E5%B8%83%E5%BC%8F%E7%B3%BB%E7%BB%9F/" rel="tag">#分布式系统</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90/" rel="tag">#源码分析</a></li></ul>
+      </section>
+
+      <section class="article-navs">
+        
+<nav class="card-container card-article-nav">
+  <div class="card-list">
+    
+      <div id="article-nav-newer" class="card-item img">
+        <article>
+          
+            <div class="card-cover" style="background-image: url(https://blog.mipa.site/img/201707/题图4.jpeg)"></div>
+          
+          <a class="card-link article-nav-link" href="/2017/07/071934.html"></a>
+          <strong class="article-nav-caption">Newer</strong>
+          <p class="article-nav-title">
+            
+              作品汇总-ACG篇4
+            
+          </p>
+        </article>
+      </div>
+    
+    
+      <div id="article-nav-older" class="card-item">
+        <article>
+          
+          <a class="card-link article-nav-link" href="/2017/04/041822.html"></a>
+          <strong class="article-nav-caption">Older</strong>
+          <p class="article-nav-title">
+            
+              phxpaxos源码阅读之五：暗度陈仓
+            
+          </p>
+        </article>
+      </div>
+    
+  </div>
+</nav>
+
+      </section>
+    </div>
+  </article>
+</div>
+
+    <!-- footer container -->
+<footer id="footer" class="footer">
+  <div class="footer-container">
+    
+    <div class="social-icons social-icons-footer">
+      <a href="https://github.com/chenneal" target="_blank" rel="noopener noreferrer">
+  <svg class="icon icon-github" viewBox="0 0 1024 1024" version="1.1" xmlns="http://www.w3.org/2000/svg">
+    <path d="M64.6 512c0 195.6 125.4 361.9 300.1 422.9 23.5 5.9 19.9-10.8 19.9-22.2v-77.6c-135.8 15.9-141.3-74-150.5-89-18.5-31.5-61.9-39.5-49-54.5 31-15.9 62.5 4 98.9 58 26.4 39.1 77.9 32.5 104.1 26 5.7-23.5 17.9-44.5 34.7-60.9-140.7-25.2-199.4-111.1-199.4-213.3 0-49.5 16.4-95.1 48.4-131.8-20.4-60.6 1.9-112.4 4.9-120.1 58.2-5.2 118.5 41.6 123.3 45.3 33.1-8.9 70.8-13.7 112.9-13.7 42.4 0 80.3 4.9 113.5 13.9 11.3-8.6 67.3-48.8 121.4-43.9 2.9 7.7 24.7 58.3 5.5 118.1 32.5 36.8 49 82.8 49 132.4 0 102.3-59 188.3-200.2 213.2 23.5 23.3 38.1 55.5 38.1 91.1v112.7c0.8 9 0 17.9 15.1 17.9C832.7 877 960.4 709.4 960.4 512.1c0-247.5-200.6-447.9-447.9-447.9C265 64.1 64.6 264.5 64.6 512z"></path>
+  </svg>
+</a><a href="https://www.zhihu.com/people/yu-xin-98-85" target="_blank" rel="noopener noreferrer">
+  <svg t="1587373160860" class="icon icon-zhihu" viewBox="0 0 1024 1024" version="1.1" xmlns="http://www.w3.org/2000/svg">
+    <path d="M544.949 561.422s0-71.387-34.779-75.050c-34.779-3.663-142.775 0-142.775 0v-219.654h161.078s-1.83-73.219-32.949-73.219h-261.755l43.93-117.148s-65.897 3.663-89.692 45.761-98.844 252.604-98.844 252.604 25.627 10.983 67.726-20.134c42.101-31.116 56.743-86.033 56.743-86.033l76.879-3.663 1.83 223.316s-133.621-1.83-161.078 0c-27.457 1.83-42.101 75.050-42.101 75.050h203.182s-18.307 124.47-69.557 214.164c-53.085 89.692-151.929 161.078-151.929 161.078s71.387 29.287 140.947-10.983c69.557-42.101 120.811-223.316 120.811-223.316l162.912 203.182s14.643-97.013-1.83-124.47c-18.307-27.457-113.49-137.283-113.49-137.283l-42.101 36.607 29.287-120.811h177.552zM587.050 188.010l-1.83 660.793h65.897l23.795 82.37 115.321-82.37h162.912v-660.793h-366.091zM879.92 775.584h-76.879l-97.013 75.050-21.965-75.050h-20.134v-512.527h215.991v512.527z"></path>
+  </svg>
+</a><a href="mailto:chenneal@126.com" target="_blank" rel="noopener noreferrer">
+  <svg class="icon icon-email" viewBox="0 0 1024 1024" version="1.1" xmlns="http://www.w3.org/2000/svg">
+    <path d="M490.338462 592.738462c11.815385 11.815385 29.538462 11.815385 41.353846 0l445.046154-413.538462c7.876923-15.753846 5.907692-41.353846-25.6-41.353846l-880.246154 1.969231c-23.630769 0-43.323077 21.661538-25.6 41.353846l445.046154 411.569231zM984.615385 340.676923c0-19.692308-23.630769-31.507692-39.384616-17.723077L596.676923 643.938462c-23.630769 21.661538-53.169231 33.476923-84.676923 33.476923s-61.046154-11.815385-84.676923-31.507693L80.738462 322.953846c-15.753846-13.784615-39.384615-3.938462-39.384616 17.723077C39.384615 334.769231 39.384615 787.692308 39.384615 787.692308c0 43.323077 35.446154 78.769231 78.769231 78.76923h787.692308c43.323077 0 78.769231-35.446154 78.769231-78.76923V340.676923z"></path>
+  </svg>
+</a><a href="https://www.youtube.com/channel/UCULCGgyTuTG8_ft7gaKSJtg/featured" target="_blank" rel="noopener noreferrer">
+  <svg class="icon icon-youtube" viewBox="0 0 1024 1024" version="1.1" xmlns="http://www.w3.org/2000/svg">
+    <path d="M981.333333 414.293333a362.666667 362.666667 0 0 0-38.826666-176.213333 124.586667 124.586667 0 0 0-73.386667-42.666667A3343.36 3343.36 0 0 0 512 182.186667a3347.2 3347.2 0 0 0-355.84 12.8 122.453333 122.453333 0 0 0-62.293333 31.573333c-38.4 35.413333-42.666667 96-46.933334 147.2a2060.373333 2060.373333 0 0 0 0 276.48 407.466667 407.466667 0 0 0 12.8 85.333333 133.973333 133.973333 0 0 0 30.293334 58.026667 122.026667 122.026667 0 0 0 63.573333 33.28 1927.68 1927.68 0 0 0 277.333333 14.08c149.333333 2.133333 280.32 0 435.2-11.946667a122.88 122.88 0 0 0 65.28-33.28 106.24 106.24 0 0 0 26.026667-42.666666 451.413333 451.413333 0 0 0 22.186667-145.066667c1.706667-23.893333 1.706667-168.106667 1.706666-193.706667zM415.573333 633.6V369.493333l252.586667 132.693334c-70.826667 39.253333-164.266667 83.626667-252.586667 131.413333z"></path>
+  </svg>
+</a>
+    </div>
+     
+    <p>&copy; 2021 <a href="/" target="_blank">死线</a></p>
+
+    
+      <p id="hitokoto"></p>
+      <script src="https://v1.hitokoto.cn/?c=a&amp;encode=js&select=%23hitokoto" defer></script>
+    
+
+    
+      <p><a href="http://www.miitbeian.gov.cn" target="_blank">粤ICP备19085010号</a></p>
+    
+
+    <p>Powered by <a href="https://hexo.io" target="_blank" rel="noopener noreferrer">Hexo</a> Theme - <a href="https://github.com/miiiku/flex-block" target="_blank" rel="noopener noreferrer author">flex-block</a></p>
+    
+    <!--
+    <div class="footer-container__texts">
+      <p>ヽ｀、ヽ｀｀、ヽ｀ヽ｀、、ヽ｀ヽ、ヽ｀、ヽ｀｀、ヽ、｀｀、、ヽ｀ヽ、｀｀、、ヽ｀ヽ、｀ヽ、｀ヽ、｀ヽ</p>
+      <p>｀、ヽ｀｀、ヽ、｀｀｀、｀、ヽ🌙｀｀、｀ヽ｀ヽ、ヽ｀、ヽ｀ヽ、ヽ｀、ヽ｀ヽ、ヽ｀、ヽ｀｀、｀ヽ、｀</p>
+      <p>｀、｀｀、｀、ヽ｀｀、、ヽヽ｀、｀ヽ｀ヽ、ヽ｀、ヽ｀ヽ、ヽ｀、、、ヽヽ、｀｀、、ヽ｀、ヽ｀｀、ヽ｀ヽ｀</p>
+      <p>ヽ｀、｀｀、｀、ヽ｀｀、、ヽヽ｀、｀、、ヽヽ、｀Time waits for on one 🍓｀、、ヽ｀、ヽ｀｀、ヽ｀ヽ｀</p>
+      <p>｀ヽ｀｀、ヽ｀ヽ｀、、ヽ｀ヽ｀ヽ｀ヽ、ヽ｀、ヽ｀｀、ヽ、｀｀、、ヽ｀ヽ、｀｀、、ヽ｀ヽ、｀ヽ、｀ヽ、｀ヽ</p>
+    </div>
+    -->
+  </div>
+</footer>
+  </div>
+
+  <div class="back-to-top-fixed">
+    <svg class="icon icon-back-to-top" viewBox="0 0 1024 1024" version="1.1" xmlns="http://www.w3.org/2000/svg">
+  <path d="M725.333333 426.666667c-12.8 0-21.333333-4.266667-29.866667-12.8l-213.333333-213.333333c-17.066667-17.066667-17.066667-42.666667 0-59.733333s42.666667-17.066667 59.733333 0l213.333333 213.333333c17.066667 17.066667 17.066667 42.666667 0 59.733333C746.666667 422.4 738.133333 426.666667 725.333333 426.666667z"></path>
+  <path d="M298.666667 426.666667c-12.8 0-21.333333-4.266667-29.866667-12.8-17.066667-17.066667-17.066667-42.666667 0-59.733333l213.333333-213.333333c17.066667-17.066667 42.666667-17.066667 59.733333 0s17.066667 42.666667 0 59.733333l-213.333333 213.333333C320 422.4 311.466667 426.666667 298.666667 426.666667z"></path>
+  <path d="M512 896c-25.6 0-42.666667-17.066667-42.666667-42.666667L469.333333 170.666667c0-25.6 17.066667-42.666667 42.666667-42.666667s42.666667 17.066667 42.666667 42.666667l0 682.666667C554.666667 878.933333 537.6 896 512 896z"></path>
+</svg> 
+  </div>
+
+  
+  
+<!-- valine 评论 start -->
+<script type="text/javascript" src="//cdn1.lncld.net/static/js/3.0.4/av-min.js"></script>
+<script type="text/javascript" src='//unpkg.com/valine/dist/Valine.min.js'></script>
+<script type="text/javascript">
+  new Valine({
+    el: "#valine_thread",
+    appId: "bOLIWMar1V0Cw9rN0y05YtsS-gzGzoHsz",
+    appKey: "2farfSz878S4va0UCDR98bYB",
+    avatar: "identicon",
+    placeholder: "随便说点什么叭～",
+    notify: true,
+    visitor: true,
+    pageSize: 10,
+  });
+</script>
+<!-- valine 评论 end -->
+
+
+
+  <!-- aplayer 音频 start -->
+  <link rel="stylesheet" href="https://unpkg.com/aplayer@1.10.1/dist/APlayer.min.css">
+  <script type="text/javascript" src="https://unpkg.com/aplayer@1.10.1/dist/APlayer.min.js"></script>
+  <script type="text/javascript">
+    const aplayer = document.querySelectorAll(".aplayer");
+    aplayer && initaplayer(aplayer);
+    function initaplayer(els) {
+      let elsArr = Array.from(els);
+      elsArr.forEach(el => {
+        let params = {
+          container: el,
+          audio: { ...el.dataset },
+          theme: "#b7daff",
+          autoplay: false,
+          loop: false,
+          mutex: true,
+        }
+        if (el.dataset.lrc) {
+          params['lrcType'] = 3
+        }
+        new APlayer(params);
+      });
+    }
+  </script>
+  <!-- aplayer 音频 end -->
+  
+
+<!-- dplayer 视频 start -->
+<script type="text/javascript" src="https://unpkg.com/dplayer@1.25.1/dist/DPlayer.min.js"></script>
+<script type="text/javascript">
+  const dplayer = document.querySelectorAll(".dplayer");
+  dplayer && initDPlayer(dplayer);
+  function initDPlayer(els) {
+    let elsArr = Array.from(els);
+    elsArr.forEach(el => {
+      let url = el.dataset.url;
+      let cover = el.dataset.cover;
+      let subtitle = el.dataset.subtitle;
+
+      let options = {
+        container: el,
+        video: { url: url, pic: cover },
+        theme: "#b7daff",
+        autoplay: false,
+        loop: false,
+        mutex: true,
+      }
+
+      if (subtitle) {
+        options.subtitle = {
+          url: el.dataset.subtitle,
+        }
+      }
+      new DPlayer(options);
+    });
+  }
+</script>
+<!-- dplayer 视频 end -->
+
+
+<!-- waterfall 瀑布流 start -->
+
+<script src="/lib/waterfall.min.js"></script>
+
+<script type="text/javascript">
+
+const waterfalls = document.querySelectorAll(".waterfall-container");
+
+if (waterfalls && waterfalls.length > 0) {
+  waterfalls.forEach((waterfall, index) => {
+    let cls = "waterfall-container-" + index;
+    waterfall.classList.add(cls);
+    initWaterfall(cls, waterfall);
+  });
+}
+
+function initWaterfall(selector, el) {
+  const options = {};
+  if (Object.keys(el.dataset).length > 0) {
+    for (let k in el.dataset) {
+      options[k] = el.dataset[k];
+    }
+  }
+  waterfall(`.${selector}`, options);
+}
+</script>
+<!-- waterfall 瀑布流 end -->
+
+
+  <!-- zoom start -->
+  
+<script src="/lib/zoom.min.js"></script>
+
+  <script type="text/javascript">
+    document.querySelector(".article-content") && zoom(".article-content");
+  </script>
+  <!-- zoom end -->
+  
+
+
+
+  
+
+
+  
+
+
+  
+
+
+
+
+<script src="/js/script.js"></script>
+
+
+  
+  <!-- 尾部用户自定义相关内容 -->
+</body>
+</html>

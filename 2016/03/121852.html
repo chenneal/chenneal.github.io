@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="X-UA-Compatible" content="ie=edge">
+  <meta name="theme-color" content="#3367D6"/>
+  <link rel="apple-touch-icon" href="/icons-192.png">
+  <link rel="manifest" href="/manifest.json">
+
+  
+
+  
+
+  
+    <meta name="author" content="死线">
+  
+
+  
+
+  
+
+  <title>Reids源码分析1-惊鸿一瞥 | 死线的部落格</title>
+
+  
+
+  
+    <link rel="icon" href="/favicon.ico">
+  
+
+  
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/typeface-source-code-pro@1.1.3/index.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlightjs@9.16.2/styles/monokai.css">
+  
+
+  
+<link rel="stylesheet" href="/css/style.css">
+
+<meta name="generator" content="Hexo 5.3.0"></head>
+<body>
+  <div class="root-container">
+    <!-- navbar -->
+<nav class="navbar">
+  <div class="navbar-content">
+    <!-- logo -->
+    <div class="navbar-logo">
+      <a href="/">
+        
+          死线的部落格
+        
+      </a>
+    </div>
+    <!-- link -->
+    <div class="navbar-link">
+      <div class="navbar-btn">
+        <div></div>
+        <div></div>
+        <div></div>
+      </div>
+      <ul class="navbar-list">
+        
+          <li class="navbar-list-item"><a href="/">首页</a></li>
+        
+          <li class="navbar-list-item"><a href="/links">友链</a></li>
+        
+          <li class="navbar-list-item"><a href="/messages">留言</a></li>
+        
+          <li class="navbar-list-item"><a href="/about">关于</a></li>
+        
+      </ul>
+    </div>
+  </div>
+</nav>
+
+    
+<!-- header container -->
+<header class="header-container post">
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  
+    <div class="header-content">
+      
+        <div class="post-image" style="background-image: url(https://r.photo.store.qq.com/psb?/V14E79GG4eqYl3/2z7xX8f4KxOsJQYfSAxYoYW7d9JON5J8JnWT*Xncr0k!/r/dFEBAAAAAAAA)"></div>
+      
+
+      <div class="post-text">
+        <div class="type-wrap">
+          <a class="article-category-link" href="/categories/%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90/">源码分析</a>
+        </div>
+        <h1 class="title-wrap">Reids源码分析1-惊鸿一瞥</h1>
+        <h2 class="title-sub-wrap">
+          <strong>死线</strong>
+          <span>发布于</span>
+          
+  <a href="javascript:;" class="article-date">
+    <time datetime="2016-03-12T10:52:29.000Z" itemprop="datePublished">2016-03-12</time>
+  </a>
+
+        </h2>
+      </div>
+    </div>
+  
+
+  
+  
+  
+</header>
+
+    <!-- 文章 -->
+
+<!-- 文章内容 -->
+
+<div class="body-container">
+  <article class="content-container article-container">
+    <div class="article-content">
+      
+      
+
+      <section class="article-entry">
+        <p>从这篇博文开始，我将正式开始分析<code>Redis</code>的源码，代码的版本是<code>Redis 3.0</code>。事先得申明一下，我写博文大多数并没有考虑多数人的要求，只是用来梳理自己的思路。所以如果你偶然看到这篇博文，却发现很难理解其内容是一件很正常的事情，当然我会尽量的保证文章的逻辑性以及完整性。再次强调一下，我是先将官方的一些文档看完再分析代码的，所以遇到一些像<code>sentinel模式</code>这样的词并不会陌生，所以你如果感到困惑，最好先去看一下文档。</p>
+<p>我没有选择网上很多人采用的先阅读与主线无关的部分，比如<code>Redis</code>定义的许多数据结构以及特定算法接口代码，而是直接进入主线，等遇到需要的数据结构时再拿出来分析。</p>
+<p>说到要理解<code>Redis</code>的执行流程，自然会想到<code>main()</code>函数，首先我们先看一下main函数的前面一小段代码：</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br></pre></td><td class="code"><pre><code class="hljs C"><span class="hljs-function"><span class="hljs-keyword">int</span> <span class="hljs-title">main</span><span class="hljs-params">(<span class="hljs-keyword">int</span> argc, <span class="hljs-keyword">char</span> **argv)</span> </span>&#123;<br>    <span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">timeval</span> <span class="hljs-title">tv</span>;</span><br><br>    <span class="hljs-comment">/* We need to initialize our libraries, and the server configuration. */</span><br><span class="hljs-meta">#<span class="hljs-meta-keyword">ifdef</span> INIT_SETPROCTITLE_REPLACEMENT</span><br>    <span class="hljs-comment">// 修改主进程的信息，一般都是指名字。 </span><br>    spt_init(argc, argv);<br><span class="hljs-meta">#<span class="hljs-meta-keyword">endif</span></span><br>    <span class="hljs-comment">// 本地化函数，有什么用？有些字符串函数可以根据当前的本地化信息经行特殊的处理。</span><br>    setlocale(LC_COLLATE,<span class="hljs-string">&quot;&quot;</span>);<br>    zmalloc_enable_thread_safeness();<br>    zmalloc_set_oom_handler(redisOutOfMemoryHandler);<br>    srand(time(<span class="hljs-literal">NULL</span>)^getpid());<br>    gettimeofday(&amp;tv,<span class="hljs-literal">NULL</span>);<br>    dictSetHashFunctionSeed(tv.tv_sec^tv.tv_usec^getpid());<br>    server.sentinel_mode = checkForSentinelMode(argc,argv);<br>    initServerConfig();<br>    <span class="hljs-comment">/* We need to init sentinel right now as parsing the configuration file</span><br><span class="hljs-comment">     * in sentinel mode will have the effect of populating the sentinel</span><br><span class="hljs-comment">     * data structures with master nodes to monitor. */</span><br>    <span class="hljs-keyword">if</span> (server.sentinel_mode) &#123;<br>        initSentinelConfig();<br>        initSentinel();<br>    &#125;<br></code></pre></td></tr></table></figure>
+
+<a id="more"></a>
+
+<p>可喜可贺，由于良好的设计，<code>main()</code>函数并不是很长，下面我将按照代码的顺序去讲解这个主函数，十分容易理解的代码将直接跳过。</p>
+<h2 id="spt-init-函数"><a href="#spt-init-函数" class="headerlink" title="spt_init()函数"></a>spt_init()函数</h2><p>这个函数我一开始在 <code>nigix</code> 的源码里也见到过，只是并不清楚它是干嘛的。后来查了相关资料，才知道这个函数为了修改进程的信息而特定弄的。比如你现在在LINUX环境下，且需要修改主进程的名词，由于主进程的名字就是 main 函数 <code>argv[0]</code> 的名称，所以你只需要修改argv指向的内存信息即可。但是这样会带来一个问题，就是因为除了argv数组的信息，每个进程的环境变量 environ 变量也存在那片内存空间里，而且和argv的内存是毗邻的，所以一旦你修改了 <code>argv[0]</code> 的内容却溢出了，那么后面的包括 environ 变量的信息也就 say goodbye 了，所以为了发生这种溢出，我们需要将这些信息移至别处再修改进程的名称，这也就是 spt_init 这个函数的作用。</p>
+<p>什么？你问没事为何要修改进程的名称，我也不清楚，据说是为了<code>brand</code>。Redis将相关的函数接口放在了 setproctitle.c 这个文件里。</p>
+<h2 id="准备工作"><a href="#准备工作" class="headerlink" title="准备工作"></a>准备工作</h2><p>在进入实际工作之前，Redis 在主函数里先做了一些的准备工作。大致步骤如下：</p>
+<ul>
+<li>本地化工作，Redis 里的 setlocale() 函数初始化之后，某些字符串函数会根据本地化的信息经行 <code>字符串</code> 的一些操作。</li>
+<li>开启线程安全模式，所谓线程安全模式，就是要保证线程访问不会出现 <code>打架</code> 的情况。</li>
+<li>设置内存溢出失败的回调函数，这里所谓的 oom 就是 <code>out of memory</code> 的意思，心塞，半天才看懂。顺便说一句，Redis会将内存溢出信息写到日志里。</li>
+<li>初始化随机数种子。</li>
+<li>获取当前的时间。</li>
+<li>设置哈希表的随机种子。</li>
+<li>检查当前服务器模式是否处于 sentinel_mode 模式，如果是，下面会根据这个参数作出别的动作。</li>
+<li>初始化服务器参数，这个 <code>initServerConfig</code> 做了很多初始化服务器配置参数的工作。其中有一些初始化步骤可能会令你费解，比如一些初始化命令操作、以及Redis字典结构的插入，可以先不用管，看下去再说。</li>
+<li>检查是否是处于 <code>sentinel_mode</code> 模式，如果是，初始化这种模式下的参数配置。实际上，只是改变了端口以及命令列表，此时将原先服务器的命令列表清空并替换成自己的一些命令。</li>
+</ul>
+<h2 id="读取参数"><a href="#读取参数" class="headerlink" title="读取参数"></a>读取参数</h2><p>这段要说的东西不多，先看代码:</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br><span class="line">45</span><br><span class="line">46</span><br><span class="line">47</span><br><span class="line">48</span><br><span class="line">49</span><br><span class="line">50</span><br><span class="line">51</span><br><span class="line">52</span><br><span class="line">53</span><br><span class="line">54</span><br><span class="line">55</span><br><span class="line">56</span><br></pre></td><td class="code"><pre><code class="hljs C"><span class="hljs-keyword">if</span> (argc &gt;= <span class="hljs-number">2</span>) &#123;<br>    <span class="hljs-keyword">int</span> j = <span class="hljs-number">1</span>; <span class="hljs-comment">/* First option to parse in argv[] */</span><br>    sds options = sdsempty();<br>    <span class="hljs-keyword">char</span> *configfile = <span class="hljs-literal">NULL</span>;<br><br>    <span class="hljs-comment">/* Handle special options --help and --version */</span><br>    <span class="hljs-keyword">if</span> (<span class="hljs-built_in">strcmp</span>(argv[<span class="hljs-number">1</span>], <span class="hljs-string">&quot;-v&quot;</span>) == <span class="hljs-number">0</span> ||<br>        <span class="hljs-built_in">strcmp</span>(argv[<span class="hljs-number">1</span>], <span class="hljs-string">&quot;--version&quot;</span>) == <span class="hljs-number">0</span>) version();<br>    <span class="hljs-keyword">if</span> (<span class="hljs-built_in">strcmp</span>(argv[<span class="hljs-number">1</span>], <span class="hljs-string">&quot;--help&quot;</span>) == <span class="hljs-number">0</span> ||<br>        <span class="hljs-built_in">strcmp</span>(argv[<span class="hljs-number">1</span>], <span class="hljs-string">&quot;-h&quot;</span>) == <span class="hljs-number">0</span>) usage();<br>    <span class="hljs-keyword">if</span> (<span class="hljs-built_in">strcmp</span>(argv[<span class="hljs-number">1</span>], <span class="hljs-string">&quot;--test-memory&quot;</span>) == <span class="hljs-number">0</span>) &#123;<br>        <span class="hljs-keyword">if</span> (argc == <span class="hljs-number">3</span>) &#123;<br>            <span class="hljs-comment">// 检测内存</span><br>            memtest(atoi(argv[<span class="hljs-number">2</span>]),<span class="hljs-number">50</span>);<br>            <span class="hljs-built_in">exit</span>(<span class="hljs-number">0</span>);<br>        &#125; <span class="hljs-keyword">else</span> &#123;<br>            <span class="hljs-built_in">fprintf</span>(<span class="hljs-built_in">stderr</span>,<span class="hljs-string">&quot;Please specify the amount of memory to test in megabytes.\n&quot;</span>);<br>            <span class="hljs-built_in">fprintf</span>(<span class="hljs-built_in">stderr</span>,<span class="hljs-string">&quot;Example: ./redis-server --test-memory 4096\n\n&quot;</span>);<br>            <span class="hljs-built_in">exit</span>(<span class="hljs-number">1</span>);<br>        &#125;<br>    &#125;<br><br>    <span class="hljs-comment">/* First argument is the config file name? */</span><br>    <span class="hljs-keyword">if</span> (argv[j][<span class="hljs-number">0</span>] != <span class="hljs-string">&#x27;-&#x27;</span> || argv[j][<span class="hljs-number">1</span>] != <span class="hljs-string">&#x27;-&#x27;</span>)<br>        configfile = argv[j++];<br>    <span class="hljs-comment">/* All the other options are parsed and conceptually appended to the</span><br><span class="hljs-comment">     * configuration file. For instance --port 6380 will generate the</span><br><span class="hljs-comment">     * string &quot;port 6380\n&quot; to be parsed after the actual file name</span><br><span class="hljs-comment">     * is parsed, if any. */</span><br>    <span class="hljs-keyword">while</span>(j != argc) &#123;<br>        <span class="hljs-keyword">if</span> (argv[j][<span class="hljs-number">0</span>] == <span class="hljs-string">&#x27;-&#x27;</span> &amp;&amp; argv[j][<span class="hljs-number">1</span>] == <span class="hljs-string">&#x27;-&#x27;</span>) &#123;<br>            <span class="hljs-comment">/* Option name */</span><br>            <span class="hljs-keyword">if</span> (sdslen(options)) options = sdscat(options,<span class="hljs-string">&quot;\n&quot;</span>);<br>            options = sdscat(options,argv[j]+<span class="hljs-number">2</span>);<br>            options = sdscat(options,<span class="hljs-string">&quot; &quot;</span>);<br>        &#125; <span class="hljs-keyword">else</span> &#123;<br>            <span class="hljs-comment">/* Option argument */</span><br>            options = sdscatrepr(options,argv[j],<span class="hljs-built_in">strlen</span>(argv[j]));<br>            options = sdscat(options,<span class="hljs-string">&quot; &quot;</span>);<br>        &#125;<br>        j++;<br>    &#125;<br>    <span class="hljs-keyword">if</span> (server.sentinel_mode &amp;&amp; configfile &amp;&amp; *configfile == <span class="hljs-string">&#x27;-&#x27;</span>) &#123;<br>        redisLog(REDIS_WARNING,<br>            <span class="hljs-string">&quot;Sentinel config from STDIN not allowed.&quot;</span>);<br>        redisLog(REDIS_WARNING,<br>            <span class="hljs-string">&quot;Sentinel needs config file on disk to save state.  Exiting...&quot;</span>);<br>        <span class="hljs-built_in">exit</span>(<span class="hljs-number">1</span>);<br>    &#125;<br>    <span class="hljs-keyword">if</span> (configfile) server.configfile = getAbsolutePath(configfile);<br>    resetServerSaveParams();<br>    loadServerConfig(configfile,options);<br>    sdsfree(options);<br>&#125; <span class="hljs-keyword">else</span> &#123;<br>    redisLog(REDIS_WARNING, <span class="hljs-string">&quot;Warning: no config file specified, using the default config. In order to specify a config file use %s /path/to/%s.conf&quot;</span>, argv[<span class="hljs-number">0</span>], server.sentinel_mode ? <span class="hljs-string">&quot;sentinel&quot;</span> : <span class="hljs-string">&quot;redis&quot;</span>);<br>&#125;<br></code></pre></td></tr></table></figure>
+
+<p>这段代码很容易理解，无非就是解析从控制台转进来的命令参数，其中比较有意思的就是Redis提供了一条内存检测的命令，这倒是在很多装机盘里面看过 :-)</p>
+<h2 id="初始化服务器"><a href="#初始化服务器" class="headerlink" title="初始化服务器"></a>初始化服务器</h2><figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br></pre></td><td class="code"><pre><code class="hljs C"><span class="hljs-comment">// 将Redis作为守护进程使用</span><br><span class="hljs-keyword">if</span> (server.daemonize) daemonize();<br>    initServer();<br>    <span class="hljs-keyword">if</span> (server.daemonize) createPidFile();<br>    redisSetProcTitle(argv[<span class="hljs-number">0</span>]);<br>    redisAsciiArt();<br>    <span class="hljs-comment">// 检查侦听事件数量的系统参数</span><br>    checkTcpBacklogSettings();<br><br>    <span class="hljs-keyword">if</span> (!server.sentinel_mode) &#123;<br>        <span class="hljs-comment">/* Things not needed when running in Sentinel mode. */</span><br>        redisLog(REDIS_WARNING,<span class="hljs-string">&quot;Server started, Redis version &quot;</span> REDIS_VERSION);<br>    <span class="hljs-meta">#<span class="hljs-meta-keyword">ifdef</span> __linux__</span><br>        linuxMemoryWarnings();<br>    <span class="hljs-meta">#<span class="hljs-meta-keyword">endif</span></span><br>    <span class="hljs-comment">// 从磁盘加载数据，这里的数据基本上都是用来做持久化的。</span><br>        loadDataFromDisk();<br>        <span class="hljs-keyword">if</span> (server.cluster_enabled) &#123;<br>            <span class="hljs-keyword">if</span> (verifyClusterConfigWithData() == REDIS_ERR) &#123;<br>                redisLog(REDIS_WARNING,<br>                    <span class="hljs-string">&quot;You can&#x27;t have keys in a DB different than DB 0 when in &quot;</span><br>                    <span class="hljs-string">&quot;Cluster mode. Exiting.&quot;</span>);<br>                <span class="hljs-built_in">exit</span>(<span class="hljs-number">1</span>);<br>            &#125;<br>        &#125;<br>        <span class="hljs-keyword">if</span> (server.ipfd_count &gt; <span class="hljs-number">0</span>)<br>            redisLog(REDIS_NOTICE,<span class="hljs-string">&quot;The server is now ready to accept connections on port %d&quot;</span>, server.port);<br>        <span class="hljs-keyword">if</span> (server.sofd &gt; <span class="hljs-number">0</span>)<br>            redisLog(REDIS_NOTICE,<span class="hljs-string">&quot;The server is now ready to accept connections at %s&quot;</span>, server.unixsocket);<br>    &#125; <span class="hljs-keyword">else</span> &#123;<br>    <span class="hljs-comment">// sentinel模式的不同处理方式</span><br>        sentinelIsRunning();<br>    &#125;<br><br>    <span class="hljs-comment">/* Warning the user about suspicious maxmemory setting. */</span><br>    <span class="hljs-comment">//内存至少1MB</span><br>    <span class="hljs-keyword">if</span> (server.maxmemory &gt; <span class="hljs-number">0</span> &amp;&amp; server.maxmemory &lt; <span class="hljs-number">1024</span>*<span class="hljs-number">1024</span>) &#123;<br>        redisLog(REDIS_WARNING,<span class="hljs-string">&quot;WARNING: You specified a maxmemory value that is less than 1MB (current value is %llu bytes). Are you sure this is what you really want?&quot;</span>, server.maxmemory);<br>    &#125;<br></code></pre></td></tr></table></figure>
+
+<p><code>daemonize()</code> 函数将 Redis 的主进程作为守护进程来使用，守护进程的内容参见 APUE 13章内容，简单的说就是使父进程退出二将 fork 出来的子进程放在后台运行的一种技术。</p>
+<p>这部分代码的重点就是 <code>initServer()</code> 函数，这个函数做了很多服务器初始化的工作，而且有些工作比较复杂，如果能理解这部分代码，对后面理解 Redis 的工作原理极有帮助，然而篇幅有限，我可能会在后面才重点展开讲，这里只粗略的提一下它做了哪些工作:</p>
+<ul>
+<li>为许多隶属于服务器的结构分配了内存空间，大部分结构都使用了字典结构 <code>dict</code> 以及双向链表 <code>list</code> 。这里的内存分配其实是极小的，大多数数据的分配都是在以后动态分配的。其中 <code>dict</code> 字典结构有点复杂，后面会专门开辟一篇分析这个结构。</li>
+<li>初始化了一些全局结构，比如 <code>createSharedObjects()</code> 初始化一些全局对象， <code>replicationScriptCacheInit()</code> 初始化了脚本的缓存，很多地方我还不是特别清楚其用意，希望后面弄明白。</li>
+<li>为后续的网络连接做了初步工作，使用TCP连接，如果你熟悉网络编程的话，这里做的工作相当于 <code>bind</code> 和 <code>listen</code> 两个阶段，顺便提一下，除了 Redis 额外建立了一个本地连接，好像是为了作为本地 benchmark 测试使用的，除了 ipv4 协议，还增加了 ipv6 协议，至于 <code>accept</code> 阶段肯定是在后面了。</li>
+<li>初始化了两个事件结构，一个是 <code>aeFileEvent</code> <code>aeTimeEvent</code> ，由于Redis使用事件驱动模型，所以你要是对这个两个事件不熟悉的话，先看官方文档吧。</li>
+<li>获取了一些系统时间（UNIX时间戳），并将部分存到了一个时间缓存里，据说是为了速度，以后直接从缓存里拿，不需要重新获取。</li>
+<li>设置了很多回调函数。</li>
+<li>初始化了集群模式的一些结构，集群部分比较复杂，会开章单讲。</li>
+</ul>
+<h2 id="工作函数（重中之重）"><a href="#工作函数（重中之重）" class="headerlink" title="工作函数（重中之重）"></a>工作函数（重中之重）</h2><p>那么重点来了，Redis 实际上是如何工作的呢？我们看到下面的代码就清楚了，它使用了一个循环不断地工作直到产生退出条件才退出。</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><code class="hljs C">aeSetBeforeSleepProc(server.el,beforeSleep);<br><span class="hljs-comment">// 工作主函数</span><br>aeMain(server.el);<br>aeDeleteEventLoop(server.el);<br><span class="hljs-keyword">return</span> <span class="hljs-number">0</span>;<br></code></pre></td></tr></table></figure>
+
+<p>主要看 <code>aeMian()</code></p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><code class="hljs C"><span class="hljs-function"><span class="hljs-keyword">void</span> <span class="hljs-title">aeMain</span><span class="hljs-params">(aeEventLoop *eventLoop)</span> </span>&#123;<br>    eventLoop-&gt;stop = <span class="hljs-number">0</span>;<br>    <span class="hljs-keyword">while</span> (!eventLoop-&gt;stop) &#123;<br>        <span class="hljs-keyword">if</span> (eventLoop-&gt;beforesleep != <span class="hljs-literal">NULL</span>)<br>            eventLoop-&gt;beforesleep(eventLoop);<br>        aeProcessEvents(eventLoop, AE_ALL_EVENTS);<br>    &#125;<br>&#125;<br></code></pre></td></tr></table></figure>
+
+<p><code>aeEventLoop</code> 是一个事件驱动的结构体，只要其 stop 成员不为真，这个主循环就会一直继续。<code>aeProcessEvents()</code> 函数处理每次循环的工作，每次在调用这个函数之前会事先调用 <code>beforesleep()</code> 函数，这是个回调函数，在初始化的时候已将它初始化到特定的函数。这个函数为处理一下上次循环留下来的残留事务，也就是所谓的 <code>善后的</code>。下面我们看 <code>aeProcessEvents()</code> 这个函数</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br><span class="line">45</span><br><span class="line">46</span><br><span class="line">47</span><br><span class="line">48</span><br><span class="line">49</span><br><span class="line">50</span><br><span class="line">51</span><br><span class="line">52</span><br><span class="line">53</span><br><span class="line">54</span><br><span class="line">55</span><br><span class="line">56</span><br><span class="line">57</span><br><span class="line">58</span><br><span class="line">59</span><br><span class="line">60</span><br><span class="line">61</span><br><span class="line">62</span><br><span class="line">63</span><br><span class="line">64</span><br><span class="line">65</span><br><span class="line">66</span><br><span class="line">67</span><br><span class="line">68</span><br><span class="line">69</span><br><span class="line">70</span><br><span class="line">71</span><br><span class="line">72</span><br><span class="line">73</span><br><span class="line">74</span><br><span class="line">75</span><br><span class="line">76</span><br><span class="line">77</span><br><span class="line">78</span><br></pre></td><td class="code"><pre><code class="hljs C"><span class="hljs-function"><span class="hljs-keyword">int</span> <span class="hljs-title">aeProcessEvents</span><span class="hljs-params">(aeEventLoop *eventLoop, <span class="hljs-keyword">int</span> flags)</span></span><br><span class="hljs-function"></span>&#123;<br>    <span class="hljs-keyword">int</span> processed = <span class="hljs-number">0</span>, numevents;<br><br>    <span class="hljs-comment">/* Nothing to do? return ASAP */</span><br>    <span class="hljs-keyword">if</span> (!(flags &amp; AE_TIME_EVENTS) &amp;&amp; !(flags &amp; AE_FILE_EVENTS)) <span class="hljs-keyword">return</span> <span class="hljs-number">0</span>;<br><br>    <span class="hljs-comment">/* Note that we want call select() even if there are no</span><br><span class="hljs-comment">     * file events to process as long as we want to process time</span><br><span class="hljs-comment">     * events, in order to sleep until the next time event is ready</span><br><span class="hljs-comment">     * to fire. */</span><br>    <span class="hljs-keyword">if</span> (eventLoop-&gt;maxfd != <span class="hljs-number">-1</span> ||<br>        ((flags &amp; AE_TIME_EVENTS) &amp;&amp; !(flags &amp; AE_DONT_WAIT))) &#123;<br>        <span class="hljs-keyword">int</span> j;<br>        aeTimeEvent *shortest = <span class="hljs-literal">NULL</span>;<br>        <span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">timeval</span> <span class="hljs-title">tv</span>, *<span class="hljs-title">tvp</span>;</span><br><br>        <span class="hljs-keyword">if</span> (flags &amp; AE_TIME_EVENTS &amp;&amp; !(flags &amp; AE_DONT_WAIT))<br>            shortest = aeSearchNearestTimer(eventLoop);<br>        <span class="hljs-keyword">if</span> (shortest) &#123;<br>            <span class="hljs-keyword">long</span> now_sec, now_ms;<br><br>            <span class="hljs-comment">/* Calculate the time missing for the nearest</span><br><span class="hljs-comment">             * timer to fire. */</span><br>            aeGetTime(&amp;now_sec, &amp;now_ms);<br>            tvp = &amp;tv;<br>            tvp-&gt;tv_sec = shortest-&gt;when_sec - now_sec;<br>            <span class="hljs-keyword">if</span> (shortest-&gt;when_ms &lt; now_ms) &#123;<br>                tvp-&gt;tv_usec = ((shortest-&gt;when_ms+<span class="hljs-number">1000</span>) - now_ms)*<span class="hljs-number">1000</span>;<br>                tvp-&gt;tv_sec --;<br>            &#125; <span class="hljs-keyword">else</span> &#123;<br>                tvp-&gt;tv_usec = (shortest-&gt;when_ms - now_ms)*<span class="hljs-number">1000</span>;<br>            &#125;<br>            <span class="hljs-keyword">if</span> (tvp-&gt;tv_sec &lt; <span class="hljs-number">0</span>) tvp-&gt;tv_sec = <span class="hljs-number">0</span>;<br>            <span class="hljs-keyword">if</span> (tvp-&gt;tv_usec &lt; <span class="hljs-number">0</span>) tvp-&gt;tv_usec = <span class="hljs-number">0</span>;<br>        &#125; <span class="hljs-keyword">else</span> &#123;<br>            <span class="hljs-comment">/* If we have to check for events but need to return</span><br><span class="hljs-comment">             * ASAP because of AE_DONT_WAIT we need to set the timeout</span><br><span class="hljs-comment">             * to zero */</span><br>            <span class="hljs-keyword">if</span> (flags &amp; AE_DONT_WAIT) &#123;<br>                tv.tv_sec = tv.tv_usec = <span class="hljs-number">0</span>;<br>                tvp = &amp;tv;<br>            &#125; <span class="hljs-keyword">else</span> &#123;<br>                <span class="hljs-comment">/* Otherwise we can block */</span><br>                tvp = <span class="hljs-literal">NULL</span>; <span class="hljs-comment">/* wait forever */</span><br>            &#125;<br>        &#125;<br><br>        <span class="hljs-comment">// linux下建立epoll模型</span><br>        numevents = aeApiPoll(eventLoop, tvp);<br>        <span class="hljs-comment">// 优先处理file event</span><br>        <span class="hljs-keyword">for</span> (j = <span class="hljs-number">0</span>; j &lt; numevents; j++) &#123;<br>            aeFileEvent *fe = &amp;eventLoop-&gt;events[eventLoop-&gt;fired[j].fd];<br>            <span class="hljs-keyword">int</span> mask = eventLoop-&gt;fired[j].mask;<br>            <span class="hljs-keyword">int</span> fd = eventLoop-&gt;fired[j].fd;<br>            <span class="hljs-keyword">int</span> rfired = <span class="hljs-number">0</span>;<br><br>        <span class="hljs-comment">/* note the fe-&gt;mask &amp; mask &amp; ... code: maybe an already processed</span><br><span class="hljs-comment">             * event removed an element that fired and we still didn&#x27;t</span><br><span class="hljs-comment">             * processed, so we check if the event is still valid. */</span><br>            <span class="hljs-keyword">if</span> (fe-&gt;mask &amp; mask &amp; AE_READABLE) &#123;<br>                rfired = <span class="hljs-number">1</span>;<br>                fe-&gt;rfileProc(eventLoop,fd,fe-&gt;clientData,mask);<br>            &#125;<br>            <span class="hljs-keyword">if</span> (fe-&gt;mask &amp; mask &amp; AE_WRITABLE) &#123;<br>                <span class="hljs-keyword">if</span> (!rfired || fe-&gt;wfileProc != fe-&gt;rfileProc)<br>                    fe-&gt;wfileProc(eventLoop,fd,fe-&gt;clientData,mask);<br>            &#125;<br>            processed++;<br>        &#125;<br>    &#125;<br>    <span class="hljs-comment">/* Check time events */</span><br>    <span class="hljs-comment">// 后续处理 time event</span><br>    <span class="hljs-keyword">if</span> (flags &amp; AE_TIME_EVENTS)<br>        processed += processTimeEvents(eventLoop);<br><br>    <span class="hljs-keyword">return</span> processed; <span class="hljs-comment">/* return the number of processed file/time events */</span><br>&#125;<br></code></pre></td></tr></table></figure>
+
+<p>这段代码可能你还觉得难以理解，没办法，毕竟知道的信息还太少。其实上述的代码猜也能猜到，就是一个不断侦听客户端的请求并不断处理请求的过程，而且对两个不同的事件会采取不同的方法和优先级。</p>
+<p>好啦，第一篇就到这了。虽然基本上还处于迷迷糊糊的状态，起码稍稍把握了 Redis 的总体处理事务的流程。接下来可能会去分析 <code>dict</code> 这个复杂的字典结构，或者继续剖析 Redis 处理客户端命令的流程，谁知道呢，随性而为吧 :-) </p>
+<p>8~~</p>
+
+      </section>
+
+      <section class="article-footer">
+        <ul class="article-tag-list" itemprop="keywords"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Redis/" rel="tag">#Redis</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90/" rel="tag">#源码分析</a></li></ul>
+      </section>
+
+      <section class="article-navs">
+        
+<nav class="card-container card-article-nav">
+  <div class="card-list">
+    
+      <div id="article-nav-newer" class="card-item">
+        <article>
+          
+          <a class="card-link article-nav-link" href="/2016/05/031957.html"></a>
+          <strong class="article-nav-caption">Newer</strong>
+          <p class="article-nav-title">
+            
+              一个Java编译问题-package与classpath
+            
+          </p>
+        </article>
+      </div>
+    
+    
+      <div id="article-nav-older" class="card-item">
+        <article>
+          
+          <a class="card-link article-nav-link" href="/2016/03/112118.html"></a>
+          <strong class="article-nav-caption">Older</strong>
+          <p class="article-nav-title">
+            
+              Redis源码阅读0-入坑前想说的
+            
+          </p>
+        </article>
+      </div>
+    
+  </div>
+</nav>
+
+      </section>
+    </div>
+  </article>
+</div>
+
+    <!-- footer container -->
+<footer id="footer" class="footer">
+  <div class="footer-container">
+    
+    <div class="social-icons social-icons-footer">
+      <a href="https://github.com/chenneal" target="_blank" rel="noopener noreferrer">
+  <svg class="icon icon-github" viewBox="0 0 1024 1024" version="1.1" xmlns="http://www.w3.org/2000/svg">
+    <path d="M64.6 512c0 195.6 125.4 361.9 300.1 422.9 23.5 5.9 19.9-10.8 19.9-22.2v-77.6c-135.8 15.9-141.3-74-150.5-89-18.5-31.5-61.9-39.5-49-54.5 31-15.9 62.5 4 98.9 58 26.4 39.1 77.9 32.5 104.1 26 5.7-23.5 17.9-44.5 34.7-60.9-140.7-25.2-199.4-111.1-199.4-213.3 0-49.5 16.4-95.1 48.4-131.8-20.4-60.6 1.9-112.4 4.9-120.1 58.2-5.2 118.5 41.6 123.3 45.3 33.1-8.9 70.8-13.7 112.9-13.7 42.4 0 80.3 4.9 113.5 13.9 11.3-8.6 67.3-48.8 121.4-43.9 2.9 7.7 24.7 58.3 5.5 118.1 32.5 36.8 49 82.8 49 132.4 0 102.3-59 188.3-200.2 213.2 23.5 23.3 38.1 55.5 38.1 91.1v112.7c0.8 9 0 17.9 15.1 17.9C832.7 877 960.4 709.4 960.4 512.1c0-247.5-200.6-447.9-447.9-447.9C265 64.1 64.6 264.5 64.6 512z"></path>
+  </svg>
+</a><a href="https://www.zhihu.com/people/yu-xin-98-85" target="_blank" rel="noopener noreferrer">
+  <svg t="1587373160860" class="icon icon-zhihu" viewBox="0 0 1024 1024" version="1.1" xmlns="http://www.w3.org/2000/svg">
+    <path d="M544.949 561.422s0-71.387-34.779-75.050c-34.779-3.663-142.775 0-142.775 0v-219.654h161.078s-1.83-73.219-32.949-73.219h-261.755l43.93-117.148s-65.897 3.663-89.692 45.761-98.844 252.604-98.844 252.604 25.627 10.983 67.726-20.134c42.101-31.116 56.743-86.033 56.743-86.033l76.879-3.663 1.83 223.316s-133.621-1.83-161.078 0c-27.457 1.83-42.101 75.050-42.101 75.050h203.182s-18.307 124.47-69.557 214.164c-53.085 89.692-151.929 161.078-151.929 161.078s71.387 29.287 140.947-10.983c69.557-42.101 120.811-223.316 120.811-223.316l162.912 203.182s14.643-97.013-1.83-124.47c-18.307-27.457-113.49-137.283-113.49-137.283l-42.101 36.607 29.287-120.811h177.552zM587.050 188.010l-1.83 660.793h65.897l23.795 82.37 115.321-82.37h162.912v-660.793h-366.091zM879.92 775.584h-76.879l-97.013 75.050-21.965-75.050h-20.134v-512.527h215.991v512.527z"></path>
+  </svg>
+</a><a href="mailto:chenneal@126.com" target="_blank" rel="noopener noreferrer">
+  <svg class="icon icon-email" viewBox="0 0 1024 1024" version="1.1" xmlns="http://www.w3.org/2000/svg">
+    <path d="M490.338462 592.738462c11.815385 11.815385 29.538462 11.815385 41.353846 0l445.046154-413.538462c7.876923-15.753846 5.907692-41.353846-25.6-41.353846l-880.246154 1.969231c-23.630769 0-43.323077 21.661538-25.6 41.353846l445.046154 411.569231zM984.615385 340.676923c0-19.692308-23.630769-31.507692-39.384616-17.723077L596.676923 643.938462c-23.630769 21.661538-53.169231 33.476923-84.676923 33.476923s-61.046154-11.815385-84.676923-31.507693L80.738462 322.953846c-15.753846-13.784615-39.384615-3.938462-39.384616 17.723077C39.384615 334.769231 39.384615 787.692308 39.384615 787.692308c0 43.323077 35.446154 78.769231 78.769231 78.76923h787.692308c43.323077 0 78.769231-35.446154 78.769231-78.76923V340.676923z"></path>
+  </svg>
+</a><a href="https://www.youtube.com/channel/UCULCGgyTuTG8_ft7gaKSJtg/featured" target="_blank" rel="noopener noreferrer">
+  <svg class="icon icon-youtube" viewBox="0 0 1024 1024" version="1.1" xmlns="http://www.w3.org/2000/svg">
+    <path d="M981.333333 414.293333a362.666667 362.666667 0 0 0-38.826666-176.213333 124.586667 124.586667 0 0 0-73.386667-42.666667A3343.36 3343.36 0 0 0 512 182.186667a3347.2 3347.2 0 0 0-355.84 12.8 122.453333 122.453333 0 0 0-62.293333 31.573333c-38.4 35.413333-42.666667 96-46.933334 147.2a2060.373333 2060.373333 0 0 0 0 276.48 407.466667 407.466667 0 0 0 12.8 85.333333 133.973333 133.973333 0 0 0 30.293334 58.026667 122.026667 122.026667 0 0 0 63.573333 33.28 1927.68 1927.68 0 0 0 277.333333 14.08c149.333333 2.133333 280.32 0 435.2-11.946667a122.88 122.88 0 0 0 65.28-33.28 106.24 106.24 0 0 0 26.026667-42.666666 451.413333 451.413333 0 0 0 22.186667-145.066667c1.706667-23.893333 1.706667-168.106667 1.706666-193.706667zM415.573333 633.6V369.493333l252.586667 132.693334c-70.826667 39.253333-164.266667 83.626667-252.586667 131.413333z"></path>
+  </svg>
+</a>
+    </div>
+     
+    <p>&copy; 2021 <a href="/" target="_blank">死线</a></p>
+
+    
+      <p id="hitokoto"></p>
+      <script src="https://v1.hitokoto.cn/?c=a&amp;encode=js&select=%23hitokoto" defer></script>
+    
+
+    
+      <p><a href="http://www.miitbeian.gov.cn" target="_blank">粤ICP备19085010号</a></p>
+    
+
+    <p>Powered by <a href="https://hexo.io" target="_blank" rel="noopener noreferrer">Hexo</a> Theme - <a href="https://github.com/miiiku/flex-block" target="_blank" rel="noopener noreferrer author">flex-block</a></p>
+    
+    <!--
+    <div class="footer-container__texts">
+      <p>ヽ｀、ヽ｀｀、ヽ｀ヽ｀、、ヽ｀ヽ、ヽ｀、ヽ｀｀、ヽ、｀｀、、ヽ｀ヽ、｀｀、、ヽ｀ヽ、｀ヽ、｀ヽ、｀ヽ</p>
+      <p>｀、ヽ｀｀、ヽ、｀｀｀、｀、ヽ🌙｀｀、｀ヽ｀ヽ、ヽ｀、ヽ｀ヽ、ヽ｀、ヽ｀ヽ、ヽ｀、ヽ｀｀、｀ヽ、｀</p>
+      <p>｀、｀｀、｀、ヽ｀｀、、ヽヽ｀、｀ヽ｀ヽ、ヽ｀、ヽ｀ヽ、ヽ｀、、、ヽヽ、｀｀、、ヽ｀、ヽ｀｀、ヽ｀ヽ｀</p>
+      <p>ヽ｀、｀｀、｀、ヽ｀｀、、ヽヽ｀、｀、、ヽヽ、｀Time waits for on one 🍓｀、、ヽ｀、ヽ｀｀、ヽ｀ヽ｀</p>
+      <p>｀ヽ｀｀、ヽ｀ヽ｀、、ヽ｀ヽ｀ヽ｀ヽ、ヽ｀、ヽ｀｀、ヽ、｀｀、、ヽ｀ヽ、｀｀、、ヽ｀ヽ、｀ヽ、｀ヽ、｀ヽ</p>
+    </div>
+    -->
+  </div>
+</footer>
+  </div>
+
+  <div class="back-to-top-fixed">
+    <svg class="icon icon-back-to-top" viewBox="0 0 1024 1024" version="1.1" xmlns="http://www.w3.org/2000/svg">
+  <path d="M725.333333 426.666667c-12.8 0-21.333333-4.266667-29.866667-12.8l-213.333333-213.333333c-17.066667-17.066667-17.066667-42.666667 0-59.733333s42.666667-17.066667 59.733333 0l213.333333 213.333333c17.066667 17.066667 17.066667 42.666667 0 59.733333C746.666667 422.4 738.133333 426.666667 725.333333 426.666667z"></path>
+  <path d="M298.666667 426.666667c-12.8 0-21.333333-4.266667-29.866667-12.8-17.066667-17.066667-17.066667-42.666667 0-59.733333l213.333333-213.333333c17.066667-17.066667 42.666667-17.066667 59.733333 0s17.066667 42.666667 0 59.733333l-213.333333 213.333333C320 422.4 311.466667 426.666667 298.666667 426.666667z"></path>
+  <path d="M512 896c-25.6 0-42.666667-17.066667-42.666667-42.666667L469.333333 170.666667c0-25.6 17.066667-42.666667 42.666667-42.666667s42.666667 17.066667 42.666667 42.666667l0 682.666667C554.666667 878.933333 537.6 896 512 896z"></path>
+</svg> 
+  </div>
+
+  
+  
+<!-- valine 评论 start -->
+<script type="text/javascript" src="//cdn1.lncld.net/static/js/3.0.4/av-min.js"></script>
+<script type="text/javascript" src='//unpkg.com/valine/dist/Valine.min.js'></script>
+<script type="text/javascript">
+  new Valine({
+    el: "#valine_thread",
+    appId: "bOLIWMar1V0Cw9rN0y05YtsS-gzGzoHsz",
+    appKey: "2farfSz878S4va0UCDR98bYB",
+    avatar: "identicon",
+    placeholder: "随便说点什么叭～",
+    notify: true,
+    visitor: true,
+    pageSize: 10,
+  });
+</script>
+<!-- valine 评论 end -->
+
+
+
+  <!-- aplayer 音频 start -->
+  <link rel="stylesheet" href="https://unpkg.com/aplayer@1.10.1/dist/APlayer.min.css">
+  <script type="text/javascript" src="https://unpkg.com/aplayer@1.10.1/dist/APlayer.min.js"></script>
+  <script type="text/javascript">
+    const aplayer = document.querySelectorAll(".aplayer");
+    aplayer && initaplayer(aplayer);
+    function initaplayer(els) {
+      let elsArr = Array.from(els);
+      elsArr.forEach(el => {
+        let params = {
+          container: el,
+          audio: { ...el.dataset },
+          theme: "#b7daff",
+          autoplay: false,
+          loop: false,
+          mutex: true,
+        }
+        if (el.dataset.lrc) {
+          params['lrcType'] = 3
+        }
+        new APlayer(params);
+      });
+    }
+  </script>
+  <!-- aplayer 音频 end -->
+  
+
+<!-- dplayer 视频 start -->
+<script type="text/javascript" src="https://unpkg.com/dplayer@1.25.1/dist/DPlayer.min.js"></script>
+<script type="text/javascript">
+  const dplayer = document.querySelectorAll(".dplayer");
+  dplayer && initDPlayer(dplayer);
+  function initDPlayer(els) {
+    let elsArr = Array.from(els);
+    elsArr.forEach(el => {
+      let url = el.dataset.url;
+      let cover = el.dataset.cover;
+      let subtitle = el.dataset.subtitle;
+
+      let options = {
+        container: el,
+        video: { url: url, pic: cover },
+        theme: "#b7daff",
+        autoplay: false,
+        loop: false,
+        mutex: true,
+      }
+
+      if (subtitle) {
+        options.subtitle = {
+          url: el.dataset.subtitle,
+        }
+      }
+      new DPlayer(options);
+    });
+  }
+</script>
+<!-- dplayer 视频 end -->
+
+
+<!-- waterfall 瀑布流 start -->
+
+<script src="/lib/waterfall.min.js"></script>
+
+<script type="text/javascript">
+
+const waterfalls = document.querySelectorAll(".waterfall-container");
+
+if (waterfalls && waterfalls.length > 0) {
+  waterfalls.forEach((waterfall, index) => {
+    let cls = "waterfall-container-" + index;
+    waterfall.classList.add(cls);
+    initWaterfall(cls, waterfall);
+  });
+}
+
+function initWaterfall(selector, el) {
+  const options = {};
+  if (Object.keys(el.dataset).length > 0) {
+    for (let k in el.dataset) {
+      options[k] = el.dataset[k];
+    }
+  }
+  waterfall(`.${selector}`, options);
+}
+</script>
+<!-- waterfall 瀑布流 end -->
+
+
+  <!-- zoom start -->
+  
+<script src="/lib/zoom.min.js"></script>
+
+  <script type="text/javascript">
+    document.querySelector(".article-content") && zoom(".article-content");
+  </script>
+  <!-- zoom end -->
+  
+
+
+
+  
+
+
+  
+
+
+  
+
+
+
+
+<script src="/js/script.js"></script>
+
+
+  
+  <!-- 尾部用户自定义相关内容 -->
+</body>
+</html>
